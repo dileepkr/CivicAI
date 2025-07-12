@@ -1,19 +1,28 @@
 [project]
-name = "dynamic_crew_automation_for_policy_analysis_and_debate"
+name = "dynamic_crew"
 version = "0.1.0"
-description = "dynamic_crew_automation_for_policy_analysis_and_debate using crewAI"
+description = "Dynamic crew automation for policy analysis and debate using crewAI"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "crewai[tools]>=0.119.0,<1.0.0"
+    "crewai[tools]>=0.119.0,<1.0.0",
+    "google-generativeai>=0.8.0",
+    "langchain-google-genai>=0.1.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "nltk>=3.8.0",
+    "spacy>=3.7.0",
+    "transformers>=4.30.0",
+    "ruff>=0.12.3",
+    "weave>=0.51.56",
 ]
 
 [project.scripts]
-dynamic_crew_automation_for_policy_analysis_and_debate = "dynamic_crew_automation_for_policy_analysis_and_debate.main:run"
-run_crew = "dynamic_crew_automation_for_policy_analysis_and_debate.main:run"
-train = "dynamic_crew_automation_for_policy_analysis_and_debate.main:train"
-replay = "dynamic_crew_automation_for_policy_analysis_and_debate.main:replay"
-test = "dynamic_crew_automation_for_policy_analysis_and_debate.main:test"
+dynamic_crew = "src.dynamic_crew.main:run"
+run_crew = "src.dynamic_crew.main:run"
+train = "src.dynamic_crew.main:train"
+replay = "src.dynamic_crew.main:replay"
+test = "src.dynamic_crew.main:test"
 
 [build-system]
 requires = ["hatchling"]

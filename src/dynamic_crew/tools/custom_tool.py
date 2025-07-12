@@ -1,0 +1,1036 @@
+import json
+import os
+from typing import Type, List, Dict, Any, Optional
+from pydantic import BaseModel, Field, ValidationError
+from crewai.tools import BaseTool
+from dotenv import load_dotenv
+import google.generativeai as genai
+from datetime import datetime
+
+# Load environment variables
+load_dotenv()
+
+# Import pandas for timestamps
+try:
+    import pandas as pd
+except ImportError:
+    # Fallback to datetime if pandas not available
+    class pd:
+        class Timestamp:
+            @staticmethod
+            def now():
+                return datetime.now().isoformat()
+
+# =============================================================================
+# OUTPUT MODELS - Pydantic models for ensuring proper JSON format and types
+# =============================================================================
+
+class UserProfile(BaseModel):
+    """Model for user profile information."""
+    name: Optional[str] = None
+    location: Optional[str] = None
+    preferences: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        json_encoders = {
+            # Add custom encoders if needed
+        }
+
+class PolicyInfo(BaseModel):
+    """Model for policy information output."""
+    title: str = Field(..., description="Policy title")
+    text: str = Field(..., description="Policy text content")
+    source_url: str = Field(default="", description="Source URL of the policy")
+    user_profile: Optional[UserProfile] = None
+    
+    class Config:
+        json_encoders = {
+            # Add custom encoders if needed
+        }
+
+class Stakeholder(BaseModel):
+    """Model for individual stakeholder information."""
+    name: str = Field(..., description="Stakeholder name or type")
+    type: str = Field(..., description="Category or type of stakeholder")
+    interests: List[str] = Field(default=[], description="List of stakeholder interests")
+    impact: str = Field(..., description="Description of how policy affects them")
+    likely_stance: str = Field(..., description="Likely stance: supportive/opposed/neutral")
+    key_concerns: List[str] = Field(default=[], description="List of key concerns")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "Property Owners",
+                "type": "business_stakeholder",
+                "interests": ["property_value", "compliance_costs"],
+                "impact": "Required to invest in seismic retrofitting",
+                "likely_stance": "opposed",
+                "key_concerns": ["financial_burden", "implementation_timeline"]
+            }
+        }
+
+class StakeholderList(BaseModel):
+    """Model for list of stakeholders."""
+    stakeholders: List[Stakeholder] = Field(..., description="List of identified stakeholders")
+    total_count: int = Field(..., description="Total number of stakeholders identified")
+    analysis_summary: str = Field(default="", description="Summary of stakeholder analysis")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "stakeholders": [
+                    {
+                        "name": "Property Owners",
+                        "type": "business_stakeholder",
+                        "interests": ["property_value", "compliance_costs"],
+                        "impact": "Required to invest in seismic retrofitting",
+                        "likely_stance": "opposed",
+                        "key_concerns": ["financial_burden", "implementation_timeline"]
+                    }
+                ],
+                "total_count": 1,
+                "analysis_summary": "Multiple stakeholders identified with varying interests"
+            }
+        }
+
+class KnowledgeBase(BaseModel):
+    """Model for knowledge base entries."""
+    stakeholder_name: str = Field(..., description="Name of the stakeholder")
+    research_data: str = Field(..., description="Research findings and analysis")
+    timestamp: str = Field(..., description="When the data was created/updated")
+    version: int = Field(default=1, description="Version number of the knowledge base")
+    previous_research: Optional[str] = Field(default=None, description="Previous research data if updating")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "stakeholder_name": "Property Owners",
+                "research_data": "Detailed analysis of policy impacts...",
+                "timestamp": "2024-01-01T10:00:00",
+                "version": 1,
+                "previous_research": None
+            }
+        }
+
+class PolicyImpact(BaseModel):
+    """Model for policy impact analysis."""
+    direct_impacts: List[str] = Field(..., description="Direct impacts on stakeholder")
+    economic_implications: List[str] = Field(..., description="Economic consequences")
+    legal_changes: List[str] = Field(..., description="Legal/regulatory changes")
+    benefits: List[str] = Field(..., description="Potential benefits")
+    risks: List[str] = Field(..., description="Potential risks")
+    short_term_consequences: List[str] = Field(..., description="Short-term effects")
+    long_term_consequences: List[str] = Field(..., description="Long-term effects")
+
+class StakeholderResearch(BaseModel):
+    """Model for stakeholder research output."""
+    stakeholder_name: str = Field(..., description="Name of the stakeholder")
+    stakeholder_type: str = Field(..., description="Type of stakeholder")
+    policy_impact: PolicyImpact = Field(..., description="Detailed policy impact analysis")
+    recommended_actions: List[str] = Field(..., description="Recommended actions for stakeholder")
+    debate_arguments: List[str] = Field(..., description="Key arguments for policy debates")
+    research_summary: str = Field(..., description="Executive summary of research findings")
+    confidence_level: str = Field(default="medium", description="Confidence level: low/medium/high")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "stakeholder_name": "Property Owners",
+                "stakeholder_type": "business_stakeholder",
+                "policy_impact": {
+                    "direct_impacts": ["Required seismic retrofitting"],
+                    "economic_implications": ["Significant upfront costs"],
+                    "legal_changes": ["New compliance requirements"],
+                    "benefits": ["Increased property safety"],
+                    "risks": ["Financial burden"],
+                    "short_term_consequences": ["Immediate compliance costs"],
+                    "long_term_consequences": ["Improved property values"]
+                },
+                "recommended_actions": ["Seek financial assistance programs"],
+                "debate_arguments": ["Need for implementation timeline flexibility"],
+                "research_summary": "Property owners face significant financial burden but gain safety benefits",
+                "confidence_level": "high"
+            }
+        }
+
+# =============================================================================
+# DEBATE MODELS - Pydantic models for structured debate system
+# =============================================================================
+
+class DebateTopic(BaseModel):
+    """Model for individual debate topics."""
+    topic_id: str = Field(..., description="Unique identifier for the topic")
+    title: str = Field(..., description="Title of the debate topic")
+    description: str = Field(..., description="Detailed description of the topic")
+    priority: int = Field(..., description="Priority level (1-10, higher is more important)")
+    stakeholders_involved: List[str] = Field(..., description="List of stakeholder names involved in this topic")
+    key_questions: List[str] = Field(default=[], description="Key questions to be addressed")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "topic_id": "implementation_timeline",
+                "title": "Implementation Timeline",
+                "description": "Discussion about the feasibility of the proposed implementation timeline",
+                "priority": 8,
+                "stakeholders_involved": ["Property Owners", "City Officials", "Contractors"],
+                "key_questions": ["Is the timeline realistic?", "What are the major bottlenecks?"]
+            }
+        }
+
+class DebateTopicList(BaseModel):
+    """Model for collection of debate topics."""
+    topics: List[DebateTopic] = Field(..., description="List of debate topics")
+    total_count: int = Field(..., description="Total number of topics")
+    analysis_summary: str = Field(default="", description="Summary of topic analysis")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "topics": [
+                    {
+                        "topic_id": "implementation_timeline",
+                        "title": "Implementation Timeline",
+                        "description": "Discussion about the feasibility of the proposed implementation timeline",
+                        "priority": 8,
+                        "stakeholders_involved": ["Property Owners", "City Officials"],
+                        "key_questions": ["Is the timeline realistic?"]
+                    }
+                ],
+                "total_count": 1,
+                "analysis_summary": "Key areas of contention identified"
+            }
+        }
+
+class Argument(BaseModel):
+    """Model for individual debate arguments."""
+    argument_id: str = Field(..., description="Unique identifier for the argument")
+    stakeholder_name: str = Field(..., description="Name of the stakeholder making the argument")
+    argument_type: str = Field(..., description="Type of argument: claim, evidence, rebuttal, counter-claim")
+    content: str = Field(..., description="The actual argument content")
+    evidence: List[str] = Field(default=[], description="Supporting evidence or sources")
+    references_argument_id: Optional[str] = Field(default=None, description="ID of argument this responds to")
+    strength: int = Field(default=5, description="Argument strength (1-10)")
+    timestamp: str = Field(..., description="When the argument was made")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "argument_id": "arg_001",
+                "stakeholder_name": "Property Owners",
+                "argument_type": "claim",
+                "content": "The proposed timeline is unrealistic for small property owners",
+                "evidence": ["Survey data showing 60% need more time", "Cost analysis report"],
+                "references_argument_id": None,
+                "strength": 7,
+                "timestamp": "2024-01-01T10:00:00"
+            }
+        }
+
+class DebateRound(BaseModel):
+    """Model for a single debate round."""
+    round_id: str = Field(..., description="Unique identifier for the round")
+    topic: DebateTopic = Field(..., description="Topic being debated in this round")
+    round_number: int = Field(..., description="Round number in the debate")
+    round_type: str = Field(..., description="Type of round: opening, argument, rebuttal, closing")
+    arguments: List[Argument] = Field(default=[], description="Arguments made in this round")
+    duration_minutes: int = Field(default=10, description="Duration of the round in minutes")
+    status: str = Field(default="pending", description="Status: pending, active, completed")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "round_id": "round_001",
+                "topic": {
+                    "topic_id": "implementation_timeline",
+                    "title": "Implementation Timeline",
+                    "description": "Discussion about timeline feasibility",
+                    "priority": 8,
+                    "stakeholders_involved": ["Property Owners", "City Officials"],
+                    "key_questions": ["Is the timeline realistic?"]
+                },
+                "round_number": 1,
+                "round_type": "opening",
+                "arguments": [],
+                "duration_minutes": 10,
+                "status": "pending"
+            }
+        }
+
+class DebateSession(BaseModel):
+    """Model for a complete debate session."""
+    session_id: str = Field(..., description="Unique identifier for the debate session")
+    policy_name: str = Field(..., description="Name of the policy being debated")
+    moderator: str = Field(..., description="Name of the moderator agent")
+    participants: List[str] = Field(..., description="List of participating stakeholder names")
+    topics: List[DebateTopic] = Field(..., description="Topics to be debated")
+    rounds: List[DebateRound] = Field(default=[], description="Debate rounds")
+    start_time: str = Field(..., description="When the debate session started")
+    end_time: Optional[str] = Field(default=None, description="When the debate session ended")
+    status: str = Field(default="preparing", description="Status: preparing, active, completed, cancelled")
+    summary: str = Field(default="", description="Summary of the debate session")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "session_id": "debate_001",
+                "policy_name": "Seismic Retrofit Policy",
+                "moderator": "Policy Debate Moderator",
+                "participants": ["Property Owners", "City Officials", "Tenants"],
+                "topics": [],
+                "rounds": [],
+                "start_time": "2024-01-01T09:00:00",
+                "end_time": None,
+                "status": "preparing",
+                "summary": ""
+            }
+        }
+
+class A2AMessage(BaseModel):
+    """Model for Agent-to-Agent communication messages."""
+    message_id: str = Field(..., description="Unique identifier for the message")
+    sender: str = Field(..., description="Name of the sending agent")
+    receiver: str = Field(..., description="Name of the receiving agent")
+    message_type: str = Field(..., description="Type: request, response, argument, query, clarification")
+    content: str = Field(..., description="The message content")
+    context: Dict[str, Any] = Field(default={}, description="Additional context for the message")
+    timestamp: str = Field(..., description="When the message was sent")
+    requires_response: bool = Field(default=False, description="Whether this message requires a response")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "message_id": "msg_001",
+                "sender": "Property Owners Agent",
+                "receiver": "City Officials Agent",
+                "message_type": "argument",
+                "content": "We need more time for implementation due to financial constraints",
+                "context": {"topic_id": "implementation_timeline", "argument_type": "claim"},
+                "timestamp": "2024-01-01T10:30:00",
+                "requires_response": True
+            }
+        }
+
+class A2AProtocol(BaseModel):
+    """Model for A2A protocol configuration."""
+    protocol_id: str = Field(..., description="Unique identifier for the protocol")
+    protocol_name: str = Field(..., description="Name of the protocol")
+    description: str = Field(..., description="Description of the protocol")
+    rules: List[str] = Field(..., description="Rules governing the protocol")
+    message_flow: List[str] = Field(..., description="Expected message flow pattern")
+    timeout_seconds: int = Field(default=300, description="Timeout for responses")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "protocol_id": "structured_debate",
+                "protocol_name": "Structured Debate Protocol",
+                "description": "Protocol for structured policy debates between stakeholder agents",
+                "rules": [
+                    "Each argument must be supported by evidence",
+                    "Rebuttals must address specific claims",
+                    "Personal attacks are not allowed"
+                ],
+                "message_flow": ["opening_statement", "argument", "rebuttal", "closing_statement"],
+                "timeout_seconds": 300
+            }
+        }
+
+# =============================================================================
+# INPUT MODELS - Already existing, keeping them for consistency
+# =============================================================================
+
+class PolicyFileReaderInput(BaseModel):
+    """Input schema for PolicyFileReader."""
+    file_path: str = Field(..., description="Path to the policy file to read")
+
+class StakeholderIdentifierInput(BaseModel):
+    """Input schema for StakeholderIdentifier."""
+    policy_text: str = Field(..., description="The policy text to analyze for stakeholders")
+
+class KnowledgeBaseManagerInput(BaseModel):
+    """Input schema for KnowledgeBaseManager."""
+    stakeholder_name: str = Field(..., description="Name of the stakeholder")
+    research_data: str = Field(..., description="Research data to store")
+    action: str = Field(..., description="Action to perform: 'create', 'update', 'retrieve'")
+
+class StakeholderResearcherInput(BaseModel):
+    """Input schema for StakeholderResearcher."""
+    stakeholder_info: str = Field(..., description="JSON string containing stakeholder information")
+    policy_text: str = Field(..., description="The policy text to analyze")
+
+# =============================================================================
+# INPUT MODELS FOR DEBATE TOOLS
+# =============================================================================
+
+class TopicAnalyzerInput(BaseModel):
+    """Input schema for TopicAnalyzer."""
+    policy_text: str = Field(..., description="The policy text to analyze for debate topics")
+    stakeholder_list: str = Field(..., description="JSON string of stakeholder information")
+
+class DebateModeratorInput(BaseModel):
+    """Input schema for DebateModerator."""
+    session_id: str = Field(..., description="ID of the debate session")
+    action: str = Field(..., description="Action: start, moderate, summarize, end")
+    context: str = Field(default="", description="Additional context for the action")
+
+class ArgumentGeneratorInput(BaseModel):
+    """Input schema for ArgumentGenerator."""
+    stakeholder_name: str = Field(..., description="Name of the stakeholder")
+    topic: str = Field(..., description="JSON string of the debate topic")
+    argument_type: str = Field(..., description="Type of argument to generate")
+    responding_to: str = Field(default="", description="ID of argument being responded to")
+
+class A2AMessengerInput(BaseModel):
+    """Input schema for A2AMessenger."""
+    sender: str = Field(..., description="Name of the sending agent")
+    receiver: str = Field(..., description="Name of the receiving agent")
+    message_type: str = Field(..., description="Type of message")
+    content: str = Field(..., description="Message content")
+    context: str = Field(default="{}", description="JSON string of additional context")
+
+# =============================================================================
+# ENHANCED TOOLS WITH PYDANTIC OUTPUT VALIDATION
+# =============================================================================
+
+class PolicyFileReader(BaseTool):
+    name: str = "PolicyFileReader"
+    description: str = (
+        "Reads policy documents from local files. Supports JSON format with policy text content."
+    )
+    args_schema: Type[BaseModel] = PolicyFileReaderInput
+
+    def _run(self, file_path: str) -> str:
+        try:
+            # Default to test_data if not absolute path
+            if not os.path.isabs(file_path):
+                file_path = os.path.join("test_data", file_path)
+            
+            with open(file_path, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+                
+            # Extract and validate policy information using Pydantic
+            user_profile_data = data.get("user_profile", {})
+            user_profile = UserProfile(
+                name=user_profile_data.get("name"),
+                location=user_profile_data.get("location"),
+                preferences=user_profile_data.get("preferences")
+            ) if user_profile_data else None
+            
+            policy_info = PolicyInfo(
+                title=data.get("policy_document", {}).get("title", "Unknown Policy"),
+                text=data.get("policy_document", {}).get("text", ""),
+                source_url=data.get("policy_document", {}).get("source_url", ""),
+                user_profile=user_profile
+            )
+            
+            return policy_info.model_dump_json(indent=2)
+            
+        except ValidationError as e:
+            return f"Error: Invalid policy data format - {str(e)}"
+        except Exception as e:
+            return f"Error reading policy file: {str(e)}"
+
+class StakeholderIdentifier(BaseTool):
+    name: str = "StakeholderIdentifier"
+    description: str = (
+        "Analyzes policy text to identify ONLY direct and main stakeholders who are immediately and significantly affected by the policy. Excludes secondary, indirect, or tangentially affected parties."
+    )
+    args_schema: Type[BaseModel] = StakeholderIdentifierInput
+
+    def _run(self, policy_text: str) -> str:
+        try:
+            # Configure Gemini API
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                return "Error: GEMINI_API_KEY not found in environment variables"
+            
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            prompt = f"""
+            Analyze the following policy text and identify ONLY the direct and main stakeholders who are immediately and significantly affected by this policy.
+            
+            STRICT CRITERIA - Include ONLY stakeholders who meet ALL of these requirements:
+            1. DIRECT IMPACT: The policy directly requires them to take action, comply with requirements, or experience immediate changes
+            2. MAIN ACTORS: They are primary parties mentioned in the policy or are the primary target/beneficiary
+            3. SIGNIFICANT CONSEQUENCES: They face substantial financial, legal, operational, or personal impacts
+            4. IMMEDIATE EFFECT: The policy affects them directly, not through secondary or indirect channels
+            
+            EXCLUDE:
+            - Secondary stakeholders (affected only through others)
+            - Indirect beneficiaries or those with minor impacts
+            - General groups with tangential interests
+            - Professional service providers unless directly regulated
+            - Advocacy groups or organizations that aren't directly affected
+            - Government agencies unless they are directly regulated (not just implementing)
+            
+            For each DIRECT and MAIN stakeholder, provide:
+            1. Stakeholder name/type
+            2. Their primary interests/concerns
+            3. How they are DIRECTLY affected (positively or negatively)
+            4. Their likely stance on the policy
+            
+            Policy Text:
+            {policy_text}
+            
+            IMPORTANT: Return ONLY a valid JSON array with this exact structure:
+            [
+                {{
+                    "name": "Stakeholder Name",
+                    "type": "stakeholder_type",
+                    "interests": ["interest1", "interest2"],
+                    "impact": "description of how policy DIRECTLY affects them",
+                    "likely_stance": "supportive/opposed/neutral",
+                    "key_concerns": ["concern1", "concern2"]
+                }}
+            ]
+            
+            Do not include any other text or explanation, just the JSON array.
+            """
+            
+            response = model.generate_content(prompt)
+            raw_response = response.text.strip()
+            
+            # Clean up the response to ensure it's valid JSON
+            if raw_response.startswith("```json"):
+                raw_response = raw_response[7:]
+            if raw_response.endswith("```"):
+                raw_response = raw_response[:-3]
+            raw_response = raw_response.strip()
+            
+            # Parse and validate the response
+            try:
+                stakeholder_data = json.loads(raw_response)
+                
+                # Validate each stakeholder using Pydantic
+                validated_stakeholders = []
+                for stakeholder in stakeholder_data:
+                    validated_stakeholder = Stakeholder(**stakeholder)
+                    validated_stakeholders.append(validated_stakeholder)
+                
+                # Create the final stakeholder list
+                stakeholder_list = StakeholderList(
+                    stakeholders=validated_stakeholders,
+                    total_count=len(validated_stakeholders),
+                    analysis_summary=f"Identified {len(validated_stakeholders)} key stakeholders affected by the policy"
+                )
+                
+                return stakeholder_list.model_dump_json(indent=2)
+                
+            except json.JSONDecodeError:
+                return f"Error: Invalid JSON response from AI model. Raw response: {raw_response}"
+            except ValidationError as e:
+                return f"Error: Invalid stakeholder data format - {str(e)}"
+            
+        except Exception as e:
+            return f"Error identifying stakeholders: {str(e)}"
+
+class KnowledgeBaseManager(BaseTool):
+    name: str = "KnowledgeBaseManager"
+    description: str = (
+        "Manages knowledge base for each stakeholder agent, storing and retrieving research data."
+    )
+    args_schema: Type[BaseModel] = KnowledgeBaseManagerInput
+
+    def _run(self, stakeholder_name: str, research_data: str, action: str) -> str:
+        try:
+            # Create knowledge directory if it doesn't exist
+            knowledge_dir = os.path.join("knowledge", "stakeholders")
+            os.makedirs(knowledge_dir, exist_ok=True)
+            
+            file_path = os.path.join(knowledge_dir, f"{stakeholder_name.lower().replace(' ', '_')}.json")
+            
+            if action == "create" or action == "update":
+                # Create knowledge base entry using Pydantic
+                knowledge_data = KnowledgeBase(
+                    stakeholder_name=stakeholder_name,
+                    research_data=research_data,
+                    timestamp=pd.Timestamp.now(),
+                    version=1
+                )
+                
+                # If updating, load existing data and increment version
+                if action == "update" and os.path.exists(file_path):
+                    with open(file_path, 'r') as f:
+                        existing_data = json.load(f)
+                    knowledge_data.version = existing_data.get("version", 1) + 1
+                    knowledge_data.previous_research = existing_data.get("research_data", "")
+                
+                # Save validated data
+                with open(file_path, 'w') as f:
+                    f.write(knowledge_data.model_dump_json(indent=2))
+                
+                return f"Knowledge base {action}d for {stakeholder_name}. Version: {knowledge_data.version}"
+                
+            elif action == "retrieve":
+                if os.path.exists(file_path):
+                    with open(file_path, 'r') as f:
+                        data = json.load(f)
+                    
+                    # Validate existing data
+                    try:
+                        knowledge_base = KnowledgeBase(**data)
+                        return knowledge_base.model_dump_json(indent=2)
+                    except ValidationError:
+                        # Return raw data if validation fails (for backwards compatibility)
+                        return json.dumps(data, indent=2)
+                else:
+                    return f"No knowledge base found for {stakeholder_name}"
+                    
+        except ValidationError as e:
+            return f"Error: Invalid knowledge base data format - {str(e)}"
+        except Exception as e:
+            return f"Error managing knowledge base: {str(e)}"
+
+class StakeholderResearcher(BaseTool):
+    name: str = "StakeholderResearcher"
+    description: str = (
+        "Conducts detailed research on how a policy affects a specific stakeholder, from their perspective."
+    )
+    args_schema: Type[BaseModel] = StakeholderResearcherInput
+
+    def _run(self, stakeholder_info: str, policy_text: str) -> str:
+        try:
+            # Configure Gemini API
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                return "Error: GEMINI_API_KEY not found in environment variables"
+            
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            stakeholder_data = json.loads(stakeholder_info)
+            stakeholder_name = stakeholder_data.get("name", "Unknown Stakeholder")
+            stakeholder_type = stakeholder_data.get("type", "unknown")
+            
+            prompt = f"""
+            You are a research analyst specializing in policy impact analysis. 
+            
+            Analyze the following policy from the perspective of this stakeholder:
+            
+            Stakeholder Information:
+            {stakeholder_info}
+            
+            Policy Text:
+            {policy_text}
+            
+            Provide a comprehensive analysis. Return ONLY a valid JSON object with this exact structure:
+            {{
+                "stakeholder_name": "{stakeholder_name}",
+                "stakeholder_type": "{stakeholder_type}",
+                "policy_impact": {{
+                    "direct_impacts": ["list of direct impacts"],
+                    "economic_implications": ["list of economic consequences"],
+                    "legal_changes": ["list of legal/regulatory changes"],
+                    "benefits": ["list of potential benefits"],
+                    "risks": ["list of potential risks"],
+                    "short_term_consequences": ["list of short-term effects"],
+                    "long_term_consequences": ["list of long-term effects"]
+                }},
+                "recommended_actions": ["list of recommended actions"],
+                "debate_arguments": ["list of key arguments for policy debates"],
+                "research_summary": "Executive summary of findings",
+                "confidence_level": "high/medium/low"
+            }}
+            
+            Do not include any other text or explanation, just the JSON object.
+            """
+            
+            response = model.generate_content(prompt)
+            raw_response = response.text.strip()
+            
+            # Clean up the response to ensure it's valid JSON
+            if raw_response.startswith("```json"):
+                raw_response = raw_response[7:]
+            if raw_response.endswith("```"):
+                raw_response = raw_response[:-3]
+            raw_response = raw_response.strip()
+            
+            # Parse and validate the response
+            try:
+                research_data = json.loads(raw_response)
+                
+                # Validate using Pydantic
+                validated_research = StakeholderResearch(**research_data)
+                
+                return validated_research.model_dump_json(indent=2)
+                
+            except json.JSONDecodeError:
+                return f"Error: Invalid JSON response from AI model. Raw response: {raw_response}"
+            except ValidationError as e:
+                return f"Error: Invalid research data format - {str(e)}"
+            
+        except Exception as e:
+            return f"Error conducting stakeholder research: {str(e)}"
+
+# =============================================================================
+# DEBATE TOOLS - Tools for structured debate system with A2A protocols
+# =============================================================================
+
+class TopicAnalyzer(BaseTool):
+    name: str = "TopicAnalyzer"
+    description: str = (
+        "Analyzes policy text and stakeholder information to identify key debate topics and areas of contention."
+    )
+    args_schema: Type[BaseModel] = TopicAnalyzerInput
+
+    def _run(self, policy_text: str, stakeholder_list: str) -> str:
+        try:
+            # Configure Gemini API
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                return "Error: GEMINI_API_KEY not found in environment variables"
+            
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            # Parse stakeholder list
+            stakeholders = json.loads(stakeholder_list)
+            stakeholder_names = [s.get('name', 'Unknown') for s in stakeholders.get('stakeholders', [])]
+            
+            prompt = f"""
+            You are a policy debate moderator. Analyze the following policy text and stakeholder information to identify key debate topics.
+            
+            Policy Text:
+            {policy_text}
+            
+            Stakeholder Information:
+            {stakeholder_list}
+            
+            Identify debate topics that are likely to generate disagreement or require discussion between stakeholders.
+            For each topic, consider:
+            1. What stakeholders would be most involved
+            2. What are the key questions or points of contention
+            3. How important/contentious is this topic (priority 1-10)
+            
+            Return ONLY a valid JSON object with this structure:
+            {{
+                "topics": [
+                    {{
+                        "topic_id": "unique_topic_id",
+                        "title": "Topic Title",
+                        "description": "Detailed description of what this topic covers",
+                        "priority": 8,
+                        "stakeholders_involved": ["Stakeholder1", "Stakeholder2"],
+                        "key_questions": ["Question 1?", "Question 2?"]
+                    }}
+                ],
+                "total_count": 3,
+                "analysis_summary": "Summary of the debate topics identified"
+            }}
+            """
+            
+            response = model.generate_content(prompt)
+            raw_response = response.text.strip()
+            
+            # Clean up the response
+            if raw_response.startswith("```json"):
+                raw_response = raw_response[7:]
+            if raw_response.endswith("```"):
+                raw_response = raw_response[:-3]
+            raw_response = raw_response.strip()
+            
+            # Parse and validate
+            try:
+                topic_data = json.loads(raw_response)
+                
+                # Validate each topic
+                validated_topics = []
+                for topic in topic_data.get('topics', []):
+                    validated_topic = DebateTopic(**topic)
+                    validated_topics.append(validated_topic)
+                
+                # Create final topic list
+                topic_list = DebateTopicList(
+                    topics=validated_topics,
+                    total_count=len(validated_topics),
+                    analysis_summary=topic_data.get('analysis_summary', f"Identified {len(validated_topics)} debate topics")
+                )
+                
+                return topic_list.model_dump_json(indent=2)
+                
+            except json.JSONDecodeError:
+                return f"Error: Invalid JSON response from AI model. Raw response: {raw_response}"
+            except ValidationError as e:
+                return f"Error: Invalid topic data format - {str(e)}"
+            
+        except Exception as e:
+            return f"Error analyzing debate topics: {str(e)}"
+
+class ArgumentGenerator(BaseTool):
+    name: str = "ArgumentGenerator"
+    description: str = (
+        "Generates structured arguments for stakeholders based on their knowledge base and the debate topic."
+    )
+    args_schema: Type[BaseModel] = ArgumentGeneratorInput
+
+    def _run(self, stakeholder_name: str, topic: str, argument_type: str, responding_to: str = "") -> str:
+        try:
+            # Configure Gemini API
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                return "Error: GEMINI_API_KEY not found in environment variables"
+            
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            # Parse topic information
+            topic_data = json.loads(topic)
+            
+            # Retrieve stakeholder's knowledge base
+            kb_manager = KnowledgeBaseManager()
+            kb_data = kb_manager._run(stakeholder_name, "", "retrieve")
+            
+            # Build prompt based on argument type
+            if argument_type == "opening":
+                prompt_instruction = "Present your stakeholder's opening position on this topic"
+            elif argument_type == "rebuttal":
+                prompt_instruction = f"Provide a rebuttal to the argument referenced by ID: {responding_to}"
+            elif argument_type == "counter-claim":
+                prompt_instruction = "Present a counter-claim with supporting evidence"
+            else:  # claim, evidence
+                prompt_instruction = f"Make a {argument_type} argument about this topic"
+            
+            prompt = f"""
+            You are representing {stakeholder_name} in a policy debate. {prompt_instruction}.
+            
+            Topic Information:
+            {topic}
+            
+            Your Knowledge Base:
+            {kb_data}
+            
+            Argument Type: {argument_type}
+            {"Responding to argument ID: " + responding_to if responding_to else ""}
+            
+            Create a structured argument following these guidelines:
+            1. Be factual and evidence-based
+            2. Stay true to your stakeholder's interests and concerns
+            3. Be respectful but firm in your position
+            4. Provide specific evidence when possible
+            
+            Return ONLY a valid JSON object with this structure:
+            {{
+                "argument_id": "unique_argument_id",
+                "stakeholder_name": "{stakeholder_name}",
+                "argument_type": "{argument_type}",
+                "content": "The main argument content",
+                "evidence": ["Evidence 1", "Evidence 2"],
+                "references_argument_id": "{responding_to if responding_to else ""}",
+                "strength": 7,
+                "timestamp": "2024-01-01T10:00:00"
+            }}
+            """
+            
+            response = model.generate_content(prompt)
+            raw_response = response.text.strip()
+            
+            # Clean up the response
+            if raw_response.startswith("```json"):
+                raw_response = raw_response[7:]
+            if raw_response.endswith("```"):
+                raw_response = raw_response[:-3]
+            raw_response = raw_response.strip()
+            
+            # Parse and validate
+            try:
+                argument_data = json.loads(raw_response)
+                
+                # Ensure proper timestamp
+                if 'timestamp' not in argument_data:
+                    argument_data['timestamp'] = pd.Timestamp.now()
+                
+                # Validate argument
+                validated_argument = Argument(**argument_data)
+                
+                return validated_argument.model_dump_json(indent=2)
+                
+            except json.JSONDecodeError:
+                return f"Error: Invalid JSON response from AI model. Raw response: {raw_response}"
+            except ValidationError as e:
+                return f"Error: Invalid argument data format - {str(e)}"
+            
+        except Exception as e:
+            return f"Error generating argument: {str(e)}"
+
+class A2AMessenger(BaseTool):
+    name: str = "A2AMessenger"
+    description: str = (
+        "Facilitates Agent-to-Agent communication with structured messaging protocols."
+    )
+    args_schema: Type[BaseModel] = A2AMessengerInput
+
+    def _run(self, sender: str, receiver: str, message_type: str, content: str, context: str = "{}") -> str:
+        try:
+            # Parse context
+            message_context = json.loads(context) if context else {}
+            
+            # Generate unique message ID
+            import uuid
+            message_id = f"msg_{uuid.uuid4().hex[:8]}"
+            
+            # Create A2A message
+            message = A2AMessage(
+                message_id=message_id,
+                sender=sender,
+                receiver=receiver,
+                message_type=message_type,
+                content=content,
+                context=message_context,
+                timestamp=pd.Timestamp.now(),
+                requires_response=message_type in ["request", "argument", "query"]
+            )
+            
+            # Store message in debate session log
+            debate_dir = os.path.join("knowledge", "debates", "messages")
+            os.makedirs(debate_dir, exist_ok=True)
+            
+            message_file = os.path.join(debate_dir, f"{message_id}.json")
+            with open(message_file, 'w') as f:
+                f.write(message.model_dump_json(indent=2))
+            
+            return message.model_dump_json(indent=2)
+            
+        except ValidationError as e:
+            return f"Error: Invalid message data format - {str(e)}"
+        except Exception as e:
+            return f"Error sending A2A message: {str(e)}"
+
+class DebateModerator(BaseTool):
+    name: str = "DebateModerator"
+    description: str = (
+        "Moderates policy debates by managing topics, rounds, and ensuring structured argumentation."
+    )
+    args_schema: Type[BaseModel] = DebateModeratorInput
+
+    def _run(self, session_id: str, action: str, context: str = "") -> str:
+        try:
+            debate_dir = os.path.join("knowledge", "debates", "sessions")
+            os.makedirs(debate_dir, exist_ok=True)
+            
+            session_file = os.path.join(debate_dir, f"{session_id}.json")
+            
+            if action == "start":
+                # Initialize new debate session
+                context_data = json.loads(context) if context else {}
+                
+                session = DebateSession(
+                    session_id=session_id,
+                    policy_name=context_data.get('policy_name', 'Unknown Policy'),
+                    moderator="Policy Debate Moderator",
+                    participants=context_data.get('participants', []),
+                    topics=context_data.get('topics', []),
+                    start_time=pd.Timestamp.now(),
+                    status="active"
+                )
+                
+                with open(session_file, 'w') as f:
+                    f.write(session.model_dump_json(indent=2))
+                
+                return f"Debate session {session_id} started successfully"
+            
+            elif action == "moderate":
+                # Load existing session
+                if not os.path.exists(session_file):
+                    return f"Error: Debate session {session_id} not found"
+                
+                with open(session_file, 'r') as f:
+                    session_data = json.load(f)
+                
+                # Configure Gemini API for moderation
+                api_key = os.getenv('GEMINI_API_KEY')
+                if not api_key:
+                    return "Error: GEMINI_API_KEY not found in environment variables"
+                
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                
+                prompt = f"""
+                You are moderating a policy debate. Based on the current session state and context, provide moderation guidance.
+                
+                Session State:
+                {json.dumps(session_data, indent=2)}
+                
+                Context:
+                {context}
+                
+                Provide moderation guidance including:
+                1. Next steps in the debate
+                2. Which stakeholder should speak next
+                3. Any procedural notes
+                4. Topic transitions if needed
+                
+                Return your moderation guidance as a clear, actionable message.
+                """
+                
+                response = model.generate_content(prompt)
+                return response.text
+            
+            elif action == "summarize":
+                # Generate debate summary
+                if not os.path.exists(session_file):
+                    return f"Error: Debate session {session_id} not found"
+                
+                with open(session_file, 'r') as f:
+                    session_data = json.load(f)
+                
+                # Configure Gemini API for summarization
+                api_key = os.getenv('GEMINI_API_KEY')
+                if not api_key:
+                    return "Error: GEMINI_API_KEY not found in environment variables"
+                
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                
+                prompt = f"""
+                Provide a comprehensive summary of this policy debate session.
+                
+                Session Data:
+                {json.dumps(session_data, indent=2)}
+                
+                Include:
+                1. Key topics discussed
+                2. Main arguments from each stakeholder
+                3. Areas of agreement and disagreement
+                4. Unresolved issues
+                5. Recommendations for next steps
+                
+                Provide an objective, balanced summary.
+                """
+                
+                response = model.generate_content(prompt)
+                
+                # Update session with summary
+                session_data['summary'] = response.text
+                session_data['status'] = 'completed'
+                session_data['end_time'] = pd.Timestamp.now()
+                
+                with open(session_file, 'w') as f:
+                    json.dump(session_data, f, indent=2)
+                
+                return response.text
+            
+            elif action == "end":
+                # End the debate session
+                if not os.path.exists(session_file):
+                    return f"Error: Debate session {session_id} not found"
+                
+                with open(session_file, 'r') as f:
+                    session_data = json.load(f)
+                
+                session_data['status'] = 'completed'
+                session_data['end_time'] = pd.Timestamp.now()
+                
+                with open(session_file, 'w') as f:
+                    json.dump(session_data, f, indent=2)
+                
+                return f"Debate session {session_id} ended successfully"
+            
+            else:
+                return f"Error: Unknown action '{action}'"
+            
+        except ValidationError as e:
+            return f"Error: Invalid debate session data format - {str(e)}"
+        except Exception as e:
+            return f"Error in debate moderation: {str(e)}"

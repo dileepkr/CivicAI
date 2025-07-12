@@ -1,0 +1,82 @@
+---
+receive_query_task:
+  description: Accept the user's query to analyze the policy {policy_name} and prepare to read the local policy file from test_data folder.
+  expected_output: The policy file path is identified and ready for reading.
+  async_execution: false
+  agent: coordinator_agent
+fetch_policy_text_task:
+  description: Use PolicyFileReader to read the local policy file {policy_name} from the test_data folder and extract the policy text and metadata. Use SerperDevTool for additional web research if needed.
+  expected_output: The policy text, title, and metadata are extracted from the local file with supplementary web research.
+  async_execution: false
+  agent: policy_discovery_agent
+analyze_policy_text_task:
+  description: Use StakeholderIdentifier tool to analyze the policy text and identify primary stakeholders who would be affected by the policy {policy_name}.
+  expected_output: A comprehensive list of stakeholders with their interests, concerns, and likely stances on the policy.
+  async_execution: false
+  agent: policy_debate_agent
+  context:
+  - fetch_policy_text_task
+dynamic_sub_agent_creation_task:
+  description: Create dynamic stakeholder agents for each identified stakeholder. Each agent will be specialized to represent their specific stakeholder's perspective and concerns.
+  expected_output: Dynamic stakeholder agents are created and configured for each primary stakeholder.
+  async_execution: false
+  agent: policy_debate_agent
+  context:
+  - analyze_policy_text_task
+stakeholder_analysis_task:
+  description: Each stakeholder agent uses StakeholderResearcher tool to conduct detailed analysis of the policy {policy_name} from their perspective and stores findings in their knowledge base using KnowledgeBaseManager. Use SerperDevTool for additional research as needed.
+  expected_output: Comprehensive research reports from each stakeholder perspective stored in individual knowledge bases.
+  async_execution: false
+  agent: advocate_sub_agents
+  context:
+  - dynamic_sub_agent_creation_task
+synthesize_summary_task:
+  description: Collect research findings from all stakeholder knowledge bases and create a balanced summary of the policy {policy_name} that includes all perspectives and key arguments.
+  expected_output: A balanced synthesis of all stakeholder perspectives on the policy with key arguments and concerns.
+  async_execution: false
+  agent: action_agent
+  context:
+  - stakeholder_analysis_task
+draft_email_task:
+  description: Use the synthesized summary to draft a comprehensive email for the user regarding the policy {policy_name}, including stakeholder perspectives and key debate points.
+  expected_output: A well-structured email draft that summarizes the policy analysis and stakeholder perspectives.
+  async_execution: false
+  agent: action_agent
+  context:
+  - synthesize_summary_task
+analyze_debate_topics_task:
+  description: Use TopicAnalyzer to analyze the policy {policy_name} and identified stakeholders to determine key debate topics and areas of contention that would benefit from structured discussion.
+  expected_output: A comprehensive list of debate topics with priority levels, involved stakeholders, and key questions for each topic.
+  async_execution: false
+  agent: debate_moderator_agent
+  context:
+  - analyze_policy_text_task
+initiate_debate_session_task:
+  description: Use DebateModerator to start a structured debate session for policy {policy_name} with the identified stakeholders and debate topics.
+  expected_output: A debate session initialized with proper A2A protocols and structured argumentation framework.
+  async_execution: false
+  agent: debate_moderator_agent
+  context:
+  - analyze_debate_topics_task
+  - stakeholder_analysis_task
+conduct_stakeholder_debate_task:
+  description: Facilitate structured debate between stakeholder agents on key policy topics. Each stakeholder agent uses ArgumentGenerator to create evidence-based arguments from their perspective and A2AMessenger for structured communication.
+  expected_output: A complete debate session with arguments, rebuttals, and structured discussion following A2A protocols.
+  async_execution: false
+  agent: advocate_sub_agents
+  context:
+  - initiate_debate_session_task
+moderate_debate_flow_task:
+  description: Use DebateModerator to guide the debate flow, ensure balanced participation, manage topic transitions, and maintain structured argumentation throughout the policy debate.
+  expected_output: Well-moderated debate with balanced participation, clear topic progression, and adherence to A2A protocols.
+  async_execution: false
+  agent: debate_moderator_agent
+  context:
+  - conduct_stakeholder_debate_task
+summarize_debate_outcomes_task:
+  description: Use DebateModerator to provide a comprehensive summary of the debate session, including key arguments, areas of agreement/disagreement, and recommendations for policy implementation.
+  expected_output: A balanced debate summary highlighting all perspectives, key findings, and actionable recommendations.
+  async_execution: false
+  agent: debate_moderator_agent
+  context:
+  - moderate_debate_flow_task

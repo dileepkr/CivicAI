@@ -1,0 +1,14 @@
+{
+    "request_id": "user456-policy789",
+    "user_profile": {
+      "persona": "Renter",
+      "location": "San Francisco, CA",
+      "initial_stance": "Undecided"
+    },
+    "policy_document": {
+      "title": "Proposed Amendment to Mandatory Soft Story Retrofit Program (MSSP)",
+      "source_url": "https://sf.gov/departments/earthquake-safety",
+      "text": "Preamble & Purpose: To amend the San Francisco Building Code by expanding the Mandatory Soft Story Retrofit Program (MSSP) to include additional building types and to establish new cost-sharing provisions between landlords and tenants for seismically-required capital improvements. This amendment aims to accelerate the seismic strengthening of the city's vulnerable housing stock while mitigating the financial impact on tenants.\n\nSection 1: Expansion of Scope\n1.1 Building Inclusion: The MSSP is expanded to include wood-frame buildings constructed before 1990 containing five or more residential units with at-grade or soft-story garages or commercial spaces.\n1.2 Compliance Deadline: All newly included buildings must submit an engineering evaluation and retrofit plan to the Department of Building Inspection within two (2) years of this ordinance's effective date. Full physical retrofit must be completed within five (5) years.\n\nSection 2: Capital Improvement Passthrough Modifications\n2.1 Passthrough Calculation: Landlords may pass through 100% of the costs of a mandatory seismic retrofit to tenants. The total monthly passthrough amount for any single tenant shall not exceed 10% of the tenant's base rent at the time the passthrough begins.\n2.2 Amortization Period: The total cost of the retrofit shall be amortized over a period of twenty (20) years. The passthrough will cease once the total certified cost has been recovered by the landlord.\n2.3 Hardship Appeals: Tenants may apply for a financial hardship exemption from the passthrough. A tenant whose household income is less than 80% of the Area Median Income (AMI) may be eligible for a full or partial reduction of the passthrough amount. The Rent Board will make the final determination on all hardship appeals."
+    }
+  }
+  
