@@ -1,0 +1,23 @@
+[project]
+name = "dynamic_crew_automation_for_policy_analysis_and_debate"
+version = "0.1.0"
+description = "dynamic_crew_automation_for_policy_analysis_and_debate using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "crewai[tools]>=0.119.0,<1.0.0"
+]
+
+[project.scripts]
+dynamic_crew_automation_for_policy_analysis_and_debate = "dynamic_crew_automation_for_policy_analysis_and_debate.main:run"
+run_crew = "dynamic_crew_automation_for_policy_analysis_and_debate.main:run"
+train = "dynamic_crew_automation_for_policy_analysis_and_debate.main:train"
+replay = "dynamic_crew_automation_for_policy_analysis_and_debate.main:replay"
+test = "dynamic_crew_automation_for_policy_analysis_and_debate.main:test"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"
