@@ -10,8 +10,8 @@ fetch_policy_text_task:
   async_execution: false
   agent: policy_discovery_agent
 analyze_policy_text_task:
-  description: Use StakeholderIdentifier tool to analyze the policy text and identify primary stakeholders who would be affected by the policy {policy_name}.
-  expected_output: A comprehensive list of stakeholders with their interests, concerns, and likely stances on the policy.
+  description: "Use the StakeholderIdentifier tool to analyze the FULL policy text and identify primary stakeholders who would be affected by the policy. The policy text should contain the complete policy content, not just a summary. Analyze the entire policy document to identify all relevant stakeholders with their interests, concerns, and likely stances."
+  expected_output: A comprehensive list of stakeholders with their interests, concerns, and likely stances on the policy, based on analysis of the complete policy text.
   async_execution: false
   agent: policy_debate_agent
   context:

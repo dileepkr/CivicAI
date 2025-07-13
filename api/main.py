@@ -464,7 +464,7 @@ class AgenticDebateRequest(BaseModel):
     policy_id: str
     policy_title: str
     policy_content: str
-    stakeholder_groups: List[str]
+    stakeholder_groups: Optional[List[str]] = None  # Now optional - will be auto-identified if not provided
     debate_rounds: Optional[int] = 3
     debate_style: str = "structured"  # "structured", "free_form", "moderated"
 
@@ -793,6 +793,35 @@ async def search_policies_stream(request: PolicySearchRequest):
             "Access-Control-Allow-Headers": "*",
         }
     )
+
+@app.post("/policies/content", response_model=Dict[str, Any])
+async def get_policy_content(request: Dict[str, Any]):
+    """
+    Get full policy content by URL using the policy discovery agent
+    """
+    if not policy_discovery_agent:
+        raise HTTPException(status_code=503, detail="Policy discovery service not available")
+    
+    try:
+        urls = request.get("urls", [])
+        if not urls:
+            raise HTTPException(status_code=400, detail="URLs list is required")
+        
+        # Get full content using the policy discovery agent's search engine
+        content_map = await policy_discovery_agent.search_engine.get_policy_content(urls)
+        
+        return {
+            "success": True,
+            "content_map": content_map
+        }
+        
+    except Exception as e:
+        logger.error(f"Policy content retrieval failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "content_map": {}
+        }
 
 @app.get("/policies/{policy_id}", response_model=PolicyResponse)
 async def get_policy(policy_id: str):
@@ -1230,25 +1259,112 @@ async def run_agentic_stakeholder_debate(request: AgenticDebateRequest):
     try:
         logger.info(f"Starting agentic stakeholder debate for: {request.policy_title}")
         
-        # Convert stakeholder groups to crew format
+        # Try to get full policy content if we have a URL
+        full_policy_content = request.policy_content
+        
+        # If we have a policy_id that looks like a URL, try to get full content
+        if request.policy_id.startswith('http'):
+            try:
+                if policy_discovery_agent:
+                    content_result = await policy_discovery_agent.search_engine.get_policy_content([request.policy_id])
+                    if request.policy_id in content_result:
+                        full_policy_content = content_result[request.policy_id].get("text", request.policy_content)
+                        logger.info(f"Retrieved full policy content ({len(full_policy_content)} characters)")
+                    else:
+                        logger.warning(f"Could not retrieve full content for {request.policy_id}")
+                else:
+                    logger.warning("Policy discovery agent not available for content retrieval")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve full policy content: {e}")
+        
+        # Identify stakeholders - use provided groups or auto-identify from policy content
         stakeholder_list = []
-        for group in request.stakeholder_groups:
-            stakeholder_list.append({
-                "name": group.replace("_", " ").title(),
-                "type": group,
-                "description": f"Representative of {group.replace('_', ' ')} interests",
-                "interests": []
-            })
+        
+        # If stakeholder groups are provided, use them
+        if request.stakeholder_groups:
+            logger.info(f"📋 Using provided stakeholder groups: {request.stakeholder_groups}")
+            for group in request.stakeholder_groups:
+                stakeholder_list.append({
+                    "name": group.replace("_", " ").title(),
+                    "type": group,
+                    "description": f"Representative of {group.replace('_', ' ')} interests",
+                    "interests": []
+                })
+        else:
+            # Automatically identify stakeholders from policy content using StakeholderIdentifier tool
+            try:
+                logger.info("🔍 Automatically identifying stakeholders from policy content...")
+                
+                # Use the same approach as the working src/main.py implementation
+                from src.dynamic_crew.tools.custom_tool import StakeholderIdentifier
+                
+                stakeholder_identifier = StakeholderIdentifier()
+                
+                # Identify stakeholders using the tool directly
+                logger.info("🎯 Analyzing policy text to identify stakeholders...")
+                stakeholder_result = stakeholder_identifier._run(full_policy_content)
+                
+                # Check if stakeholder identification was successful
+                if stakeholder_result.startswith("Error"):
+                    logger.warning(f"Stakeholder identification failed: {stakeholder_result}")
+                    # Fallback to basic stakeholders
+                    stakeholder_list = [
+                        {"name": "Residents", "type": "residents", "description": "Local residents affected by the policy", "interests": ["community impact", "quality of life"]},
+                        {"name": "Businesses", "type": "businesses", "description": "Local businesses impacted by the policy", "interests": ["economic impact", "regulatory compliance"]}
+                    ]
+                else:
+                    # Parse the validated stakeholder data
+                    try:
+                        stakeholder_data = json.loads(stakeholder_result)
+                        
+                        # The new format includes a 'stakeholders' array and metadata
+                        if 'stakeholders' in stakeholder_data:
+                            stakeholder_list = stakeholder_data['stakeholders']
+                            total_count = stakeholder_data.get('total_count', len(stakeholder_list))
+                            
+                            logger.info(f"✅ Identified {total_count} stakeholders automatically")
+                            
+                            # Log stakeholder summary
+                            logger.info("🏷️  Debate Participants:")
+                            for i, stakeholder in enumerate(stakeholder_list, 1):
+                                name = stakeholder.get('name', 'Unknown')
+                                stakeholder_type = stakeholder.get('type', 'unknown')
+                                likely_stance = stakeholder.get('likely_stance', 'unknown')
+                                logger.info(f"  {i}. {name} ({stakeholder_type}) - Initial Stance: {likely_stance}")
+                        else:
+                            logger.warning("Invalid stakeholder data format - missing 'stakeholders' array")
+                            # Fallback to basic stakeholders
+                            stakeholder_list = [
+                                {"name": "Residents", "type": "residents", "description": "Local residents affected by the policy", "interests": ["community impact", "quality of life"]},
+                                {"name": "Businesses", "type": "businesses", "description": "Local businesses impacted by the policy", "interests": ["economic impact", "regulatory compliance"]}
+                            ]
+                            
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Could not parse stakeholder data as JSON: {e}")
+                        logger.error(f"Raw response: {stakeholder_result}")
+                        # Fallback to basic stakeholders
+                        stakeholder_list = [
+                            {"name": "Residents", "type": "residents", "description": "Local residents affected by the policy", "interests": ["community impact", "quality of life"]},
+                            {"name": "Businesses", "type": "businesses", "description": "Local businesses impacted by the policy", "interests": ["economic impact", "regulatory compliance"]}
+                        ]
+                        
+            except Exception as e:
+                logger.error(f"Stakeholder identification failed: {e}")
+                # Fallback to basic stakeholders
+                stakeholder_list = [
+                    {"name": "Residents", "type": "residents", "description": "Local residents affected by the policy", "interests": ["community impact", "quality of life"]},
+                    {"name": "Businesses", "type": "businesses", "description": "Local businesses impacted by the policy", "interests": ["economic impact", "regulatory compliance"]}
+                ]
         
         # Set up debate crew
         debate_crew = crew_system.setup_debate_crew(stakeholder_list)
         
-        # Prepare debate context
+        # Prepare debate context with full policy content
         debate_context = {
             "policy_id": request.policy_id,
             "policy_name": request.policy_title,  # Use policy_name for template compatibility
             "policy_title": request.policy_title,
-            "policy_content": request.policy_content,
+            "policy_content": full_policy_content,  # Use full content instead of limited content
             "stakeholders": stakeholder_list,
             "debate_rounds": request.debate_rounds,
             "debate_style": request.debate_style
@@ -1482,14 +1598,32 @@ async def generate_email(request: EmailGenerationRequest):
                 error="Crew system not initialized"
             )
         
+        # Try to get full policy content if we have a URL
+        full_policy_content = request.policy_content
+        
+        # If we have a policy_id that looks like a URL, try to get full content
+        if request.policy_id.startswith('http'):
+            try:
+                if policy_discovery_agent:
+                    content_result = await policy_discovery_agent.search_engine.get_policy_content([request.policy_id])
+                    if request.policy_id in content_result:
+                        full_policy_content = content_result[request.policy_id].get("text", request.policy_content)
+                        logger.info(f"Retrieved full policy content for email ({len(full_policy_content)} characters)")
+                    else:
+                        logger.warning(f"Could not retrieve full content for email: {request.policy_id}")
+                else:
+                    logger.warning("Policy discovery agent not available for email content retrieval")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve full policy content for email: {e}")
+        
         # Use the action agent to generate the email
         action_agent = crew_system.action_agent()
         
-        # Prepare context for email generation
+        # Prepare context for email generation with full content
         email_context = {
             "policy_id": request.policy_id,
             "policy_title": request.policy_title,
-            "policy_content": request.policy_content,
+            "policy_content": full_policy_content,  # Use full content instead of limited content
             "user_perspective": request.user_perspective,
             "debate_context": request.debate_context or []
         }
@@ -1498,7 +1632,7 @@ async def generate_email(request: EmailGenerationRequest):
         email_prompt = f"""
         Generate a professional advocacy email about the policy: {request.policy_title}
         
-        Policy Content: {request.policy_content}
+        Policy Content: {full_policy_content}
         
         User Perspective: {request.user_perspective}
         

@@ -3,8 +3,10 @@ from crewai.project import CrewBase, agent, crew, task
 from crewai_tools import SerperDevTool, ScrapeWebsiteTool
 import os
 import logging
+import yaml
 from datetime import datetime
 from typing import List, Dict, Any
+from pathlib import Path
 
 # Import the integrated policy discovery agent
 from .policy_discovery import PolicyDiscoveryAgent, UserContext, PolicyDomain, GovernmentLevel
@@ -24,8 +26,8 @@ class WeaveCrewAILLM:
         self.model_name = weave_client.model_name
         self.temperature = 0.7
     
-    def invoke(self, prompt: str, **kwargs) -> str:
-        """CrewAI compatible invoke method"""
+    def call(self, prompt: str, **kwargs) -> str:
+        """CrewAI compatible call method - this is the main method CrewAI uses"""
         return self.weave_client.generate_text(
             prompt=prompt,
             temperature=kwargs.get('temperature', self.temperature),
@@ -33,13 +35,17 @@ class WeaveCrewAILLM:
             model=kwargs.get('model', self.model_name)
         )
     
+    def invoke(self, prompt: str, **kwargs) -> str:
+        """CrewAI compatible invoke method - fallback"""
+        return self.call(prompt, **kwargs)
+    
     def predict(self, prompt: str, **kwargs) -> str:
         """Alternative predict method for compatibility"""
-        return self.invoke(prompt, **kwargs)
+        return self.call(prompt, **kwargs)
     
     def generate_content(self, prompt: str, **kwargs) -> str:
         """Gemini-style interface compatibility"""
-        return self.invoke(prompt, **kwargs)
+        return self.call(prompt, **kwargs)
 
 from .tools.custom_tool import (
     PolicyFileReader,
@@ -52,11 +58,32 @@ from .tools.custom_tool import (
     DebateModerator
 )
 
+def load_yaml_config(config_file: str) -> Dict[str, Any]:
+    """Load YAML configuration file"""
+    config_path = Path(__file__).parent / "config" / config_file
+    try:
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+            print(f"✅ Loaded {config_file}: {len(config)} items")
+            return config
+    except Exception as e:
+        print(f"⚠️  Failed to load {config_file}: {e}")
+        print(f"   Config path: {config_path}")
+        return {}
+
 @CrewBase
 class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
     """DynamicCrewAutomationForPolicyAnalysisAndDebate crew"""
     
     def __init__(self):
+        # Load configurations before calling super().__init__()
+        print("🔧 Loading YAML configurations...")
+        self.agents_config = load_yaml_config("agents.yaml")
+        self.tasks_config = load_yaml_config("tasks.yaml")
+        
+        print(f"📋 Agents config keys: {list(self.agents_config.keys()) if self.agents_config else 'None'}")
+        print(f"📋 Tasks config keys: {list(self.tasks_config.keys()) if self.tasks_config else 'None'}")
+        
         super().__init__()
         self.stakeholder_agents = {}
         self.stakeholder_tasks = {}
@@ -115,6 +142,14 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
                         print("⚠️  No API keys available, using WeaveCrewAILLM wrapper")
                         self.llm = WeaveCrewAILLM(self.weave_client)
                 
+                # Add retry configuration to handle rate limits
+                if hasattr(self.llm, 'config'):
+                    self.llm.config.update({
+                        'max_retries': 3,
+                        'retry_delay': 2,
+                        'timeout': 60
+                    })
+                
             except Exception as llm_error:
                 print(f"⚠️  LLM configuration failed: {llm_error}")
                 
@@ -154,24 +189,40 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
 
     @agent
     def coordinator_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['coordinator_agent'],
-            tools=[self.policy_file_reader],
-            llm=self.llm,
-        )
+        print(f"🔍 Creating coordinator_agent with config: {self.agents_config.get('coordinator_agent', 'NOT_FOUND')}")
+        try:
+            return Agent(
+                config=self.agents_config['coordinator_agent'],
+                tools=[self.policy_file_reader],
+                llm=self.llm,
+                allow_delegation=False,  # Prevent delegation, use tools directly
+                verbose=True,
+                max_iter=1,  # Limit iterations to prevent loops
+            )
+        except Exception as e:
+            print(f"❌ Error in coordinator_agent: {e}")
+            print(f"   agents_config type: {type(self.agents_config)}")
+            print(f"   agents_config keys: {list(self.agents_config.keys()) if isinstance(self.agents_config, dict) else 'Not a dict'}")
+            raise
 
     @agent
     def policy_discovery_agent(self) -> Agent:
         """Enhanced policy discovery agent using integrated Exa API for comprehensive policy search"""
-        return Agent(
-            role="Universal Policy Discovery Specialist",
-            goal="Discover and categorize relevant policies across all government levels (Federal, State of California, City of San Francisco) based on user context and stakeholder roles using integrated Exa API",
-            backstory="""You are an expert in navigating complex government policy landscapes with deep knowledge of Federal, California State, and San Francisco local governance structures. You excel at identifying policies that impact specific stakeholder groups using advanced AI-powered search capabilities through the integrated Exa API. Your expertise includes real-time policy discovery, stakeholder impact assessment, and translating complex governmental processes into actionable insights for civic engagement.""",
-            tools=[self.policy_file_reader, SerperDevTool(), ScrapeWebsiteTool()],
-            llm=self.llm,
-            verbose=True,
-            allow_delegation=False,
-        )
+        print(f"🔍 Creating policy_discovery_agent")
+        try:
+            return Agent(
+                role="Universal Policy Discovery Specialist",
+                goal="Discover and categorize relevant policies across all government levels (Federal, State of California, City of San Francisco) based on user context and stakeholder roles using integrated Exa API",
+                backstory="""You are an expert in navigating complex government policy landscapes with deep knowledge of Federal, California State, and San Francisco local governance structures. You excel at identifying policies that impact specific stakeholder groups using advanced AI-powered search capabilities through the integrated Exa API. Your expertise includes real-time policy discovery, stakeholder impact assessment, and translating complex governmental processes into actionable insights for civic engagement.""",
+                tools=[self.policy_file_reader, SerperDevTool(), ScrapeWebsiteTool()],
+                llm=self.llm,
+                verbose=True,
+                allow_delegation=False,  # Prevent delegation, use tools directly
+                max_iter=1,  # Limit iterations to prevent loops
+            )
+        except Exception as e:
+            print(f"❌ Error in policy_discovery_agent: {e}")
+            raise
 
     async def discover_policies_for_context(self, user_location: str, stakeholder_roles: List[str], interests: List[str]) -> Dict[str, Any]:
         """
@@ -266,57 +317,90 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
 
     @agent
     def policy_debate_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['policy_debate_agent'],
-            tools=[
-                self.stakeholder_identifier, 
-                self.knowledge_base_manager,
-                SerperDevTool(), 
-                ScrapeWebsiteTool()
-            ],
-            llm=self.llm,
-            allow_delegation=False,  # Prevent delegation, use tools directly
-        )
+        print(f"🔍 Creating policy_debate_agent with config: {self.agents_config.get('policy_debate_agent', 'NOT_FOUND')}")
+        try:
+            return Agent(
+                config=self.agents_config['policy_debate_agent'],
+                tools=[
+                    self.stakeholder_identifier, 
+                    self.knowledge_base_manager,
+                    SerperDevTool(), 
+                    ScrapeWebsiteTool()
+                ],
+                llm=self.llm,
+                allow_delegation=False,  # Prevent delegation, use tools directly
+                max_iter=1,  # Limit iterations to prevent loops
+            )
+        except Exception as e:
+            print(f"❌ Error in policy_debate_agent: {e}")
+            print(f"   agents_config type: {type(self.agents_config)}")
+            print(f"   agents_config keys: {list(self.agents_config.keys()) if isinstance(self.agents_config, dict) else 'Not a dict'}")
+            raise
 
     @agent
     def advocate_sub_agents(self) -> Agent:
-        return Agent(
-            config=self.agents_config['advocate_sub_agents'],
-            tools=[
-                self.stakeholder_researcher,
-                self.knowledge_base_manager,
-                self.argument_generator,
-                self.a2a_messenger,
-                SerperDevTool(),
-                ScrapeWebsiteTool()
-            ],
-            llm=self.llm,
-            allow_delegation=False,  # Prevent delegation, use tools directly
-        )
+        print(f"🔍 Creating advocate_sub_agents with config: {self.agents_config.get('advocate_sub_agents', 'NOT_FOUND')}")
+        try:
+            return Agent(
+                config=self.agents_config['advocate_sub_agents'],
+                tools=[
+                    self.stakeholder_researcher,
+                    self.knowledge_base_manager,
+                    self.argument_generator,
+                    self.a2a_messenger,
+                    SerperDevTool(),
+                    ScrapeWebsiteTool()
+                ],
+                llm=self.llm,
+                allow_delegation=False,  # Prevent delegation, use tools directly
+                max_iter=1,  # Limit iterations to prevent loops
+            )
+        except Exception as e:
+            print(f"❌ Error in advocate_sub_agents: {e}")
+            print(f"   agents_config type: {type(self.agents_config)}")
+            print(f"   agents_config keys: {list(self.agents_config.keys()) if isinstance(self.agents_config, dict) else 'Not a dict'}")
+            raise
 
     @agent
     def action_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['action_agent'],
-            tools=[self.knowledge_base_manager],
-            llm=self.llm,
-            allow_delegation=False,  # Prevent delegation, use tools directly
-        )
+        print(f"🔍 Creating action_agent with config: {self.agents_config.get('action_agent', 'NOT_FOUND')}")
+        try:
+            return Agent(
+                config=self.agents_config['action_agent'],
+                tools=[self.knowledge_base_manager],
+                llm=self.llm,
+                allow_delegation=False,  # Prevent delegation, use tools directly
+                max_iter=1,  # Limit iterations to prevent loops
+            )
+        except Exception as e:
+            print(f"❌ Error in action_agent: {e}")
+            print(f"   agents_config type: {type(self.agents_config)}")
+            print(f"   agents_config keys: {list(self.agents_config.keys()) if isinstance(self.agents_config, dict) else 'Not a dict'}")
+            raise
 
     @agent
     def debate_moderator_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['debate_moderator_agent'],
-            tools=[
-                self.topic_analyzer,
-                self.debate_moderator,
-                self.a2a_messenger,
-                self.knowledge_base_manager,
-                SerperDevTool()
-            ],
-            llm=self.llm,
-            allow_delegation=False,  # Prevent delegation, use tools directly
-        )
+        print(f"🔍 Creating debate_moderator_agent with config: {self.agents_config.get('debate_moderator_agent', 'NOT_FOUND')}")
+        try:
+            return Agent(
+                config=self.agents_config['debate_moderator_agent'],
+                tools=[
+                    self.topic_analyzer,
+                    self.debate_moderator,
+                    self.a2a_messenger,
+                    self.knowledge_base_manager,
+                    SerperDevTool()
+                ],
+                llm=self.llm,
+                allow_delegation=False,  # Prevent delegation, use tools directly
+                verbose=True,
+                max_iter=1,  # Limit iterations to prevent loops
+            )
+        except Exception as e:
+            print(f"❌ Error in debate_moderator_agent: {e}")
+            print(f"   agents_config type: {type(self.agents_config)}")
+            print(f"   agents_config keys: {list(self.agents_config.keys()) if isinstance(self.agents_config, dict) else 'Not a dict'}")
+            raise
 
     def create_stakeholder_agent(self, stakeholder_info: Dict[str, Any]) -> Agent:
         """Create a dynamic agent for a specific stakeholder"""
@@ -338,6 +422,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
             backstory=agent_config["backstory"],
             verbose=agent_config["verbose"],
             allow_delegation=False,  # Always disable delegation for stakeholder agents
+            max_iter=1,  # Limit iterations to prevent loops
             tools=[
                 self.stakeholder_researcher,
                 self.knowledge_base_manager,
@@ -379,33 +464,54 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
 
     @task
     def receive_query_task(self) -> Task:
-        task_config = self.tasks_config['receive_query_task']
-        return Task(
-            description=task_config['description'],
-            expected_output=task_config['expected_output'],
-            agent=self.coordinator_agent(),
-            tools=[self.policy_file_reader],
-        )
+        print(f"🔍 Creating receive_query_task with config: {self.tasks_config.get('receive_query_task', 'NOT_FOUND')}")
+        try:
+            task_config = self.tasks_config['receive_query_task']
+            return Task(
+                description=task_config['description'],
+                expected_output=task_config['expected_output'],
+                agent=self.coordinator_agent(),
+                tools=[self.policy_file_reader],
+            )
+        except Exception as e:
+            print(f"❌ Error in receive_query_task: {e}")
+            print(f"   tasks_config type: {type(self.tasks_config)}")
+            print(f"   tasks_config keys: {list(self.tasks_config.keys()) if isinstance(self.tasks_config, dict) else 'Not a dict'}")
+            raise
 
     @task
     def fetch_policy_text_task(self) -> Task:
-        task_config = self.tasks_config['fetch_policy_text_task']
-        return Task(
-            description=task_config['description'],
-            expected_output=task_config['expected_output'],
-            agent=self.policy_discovery_agent(),
-            tools=[self.policy_file_reader, SerperDevTool(), ScrapeWebsiteTool()],
-        )
+        print(f"🔍 Creating fetch_policy_text_task with config: {self.tasks_config.get('fetch_policy_text_task', 'NOT_FOUND')}")
+        try:
+            task_config = self.tasks_config['fetch_policy_text_task']
+            return Task(
+                description=task_config['description'],
+                expected_output=task_config['expected_output'],
+                agent=self.policy_discovery_agent(),
+                tools=[self.policy_file_reader, SerperDevTool(), ScrapeWebsiteTool()],
+            )
+        except Exception as e:
+            print(f"❌ Error in fetch_policy_text_task: {e}")
+            print(f"   tasks_config type: {type(self.tasks_config)}")
+            print(f"   tasks_config keys: {list(self.tasks_config.keys()) if isinstance(self.tasks_config, dict) else 'Not a dict'}")
+            raise
 
     @task
     def analyze_policy_text_task(self) -> Task:
-        task_config = self.tasks_config['analyze_policy_text_task']
-        return Task(
-            description=task_config['description'],
-            expected_output=task_config['expected_output'],
-            agent=self.policy_debate_agent(),
-            tools=[self.stakeholder_identifier],
-        )
+        print(f"🔍 Creating analyze_policy_text_task with config: {self.tasks_config.get('analyze_policy_text_task', 'NOT_FOUND')}")
+        try:
+            task_config = self.tasks_config['analyze_policy_text_task']
+            return Task(
+                description=task_config['description'],
+                expected_output=task_config['expected_output'],
+                agent=self.policy_debate_agent(),
+                tools=[self.stakeholder_identifier],
+            )
+        except Exception as e:
+            print(f"❌ Error in analyze_policy_text_task: {e}")
+            print(f"   tasks_config type: {type(self.tasks_config)}")
+            print(f"   tasks_config keys: {list(self.tasks_config.keys()) if isinstance(self.tasks_config, dict) else 'Not a dict'}")
+            raise
 
     @task
     def dynamic_sub_agent_creation_task(self) -> Task:
@@ -716,31 +822,50 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         
         # Create stakeholder agents with debate capabilities
         stakeholder_agents = []
+        stakeholder_tasks = []
         
         for stakeholder_info in stakeholder_list:
             agent = self.create_stakeholder_agent(stakeholder_info)
             stakeholder_agents.append(agent)
             
-            # Store for later reference
             stakeholder_name = stakeholder_info.get("name", "Unknown")
+            
+            # Create stakeholder-specific research task for this agent
+            stakeholder_research_task = Task(
+                description=f"IMPORTANT: Use the StakeholderResearcher tool directly to conduct detailed analysis of the policy from {stakeholder_name}'s perspective. Do NOT delegate this task. Use the KnowledgeBaseManager tool to store your findings. Use SerperDevTool for additional research if needed. You must complete this analysis yourself using the available tools.",
+                expected_output=f"Comprehensive research report from {stakeholder_name}'s perspective stored in the knowledge base using KnowledgeBaseManager.",
+                agent=agent,  # Assign to specific stakeholder agent
+                tools=[self.stakeholder_researcher, self.knowledge_base_manager, SerperDevTool()]
+            )
+            
+            # Create stakeholder-specific debate task for this agent
+            stakeholder_debate_task = Task(
+                description=f"IMPORTANT: Use the ArgumentGenerator tool directly to create evidence-based arguments from {stakeholder_name}'s perspective on the debate topics. Use A2AMessenger for structured communication with other agents. Do NOT delegate this task. You must generate arguments yourself using the available tools.",
+                expected_output=f"Evidence-based arguments from {stakeholder_name}'s perspective using ArgumentGenerator, with structured communication via A2AMessenger.",
+                agent=agent,  # Assign to specific stakeholder agent
+                tools=[self.argument_generator, self.a2a_messenger, self.knowledge_base_manager]
+            )
+            
+            stakeholder_tasks.extend([stakeholder_research_task, stakeholder_debate_task])
+            
+            # Store for later reference
             self.stakeholder_agents[stakeholder_name] = agent
+            self.stakeholder_tasks[stakeholder_name] = stakeholder_research_task
         
-        # Debate-specific agents
+        # Debate-specific agents (non-stakeholder agents)
         debate_agents = [
             self.debate_moderator_agent(),
             self.coordinator_agent(),
             self.policy_debate_agent(),
         ] + stakeholder_agents
         
-        # Debate-specific tasks
+        # Debate-specific tasks (non-stakeholder tasks)
         debate_tasks = [
-            self.stakeholder_analysis_task(),
             self.analyze_debate_topics_task(),
             self.initiate_debate_session_task(),
-            self.conduct_stakeholder_debate_task(),
             self.moderate_debate_flow_task(),
             self.summarize_debate_outcomes_task(),
-        ]
+        ] + stakeholder_tasks  # Add stakeholder-specific tasks
         
         return Crew(
             agents=debate_agents,

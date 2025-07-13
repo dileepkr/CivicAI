@@ -366,9 +366,9 @@ const ChatInterface: React.FC = () => {
       addBotMessage("Starting stakeholder debate...");
       
       const debateRequest: AgenticDebateRequest = {
-        policy_id: policy.id,
+        policy_id: policy.url, // Send the URL so backend can fetch full content
         policy_title: policy.title,
-        policy_content: policy.summary || policy.content_preview || '',
+        policy_content: policy.summary || policy.content_preview || '', // Fallback content
         stakeholder_groups: ['tenants', 'landlords', 'city_officials', 'business_owners']
       };
 
@@ -408,9 +408,9 @@ const ChatInterface: React.FC = () => {
       addBotMessage("Generating advocacy email...");
       
       const emailRequest: EmailGenerationRequest = {
-        policy_id: policy.id,
+        policy_id: policy.url, // Send the URL so backend can fetch full content
         policy_title: policy.title,
-        policy_content: policy.summary || policy.content_preview || '',
+        policy_content: policy.summary || policy.content_preview || '', // Fallback content
         user_perspective: 'concerned_citizen',
         debate_context: debateContext?.debateMessages || debateMessages
       };

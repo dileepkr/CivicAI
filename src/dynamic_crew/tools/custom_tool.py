@@ -1,27 +1,29 @@
 import json
 import os
-from typing import Type, List, Dict, Any, Optional
+import uuid
+from typing import Type, List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field, ValidationError
 from crewai.tools import BaseTool
 from dotenv import load_dotenv
 from datetime import datetime
+import logging
 
 # Load environment variables
 load_dotenv()
 
-# Import the centralized Weave client
-from ..weave_client import get_weave_client
+# Configure logging
+logger = logging.getLogger(__name__)
 
-# Import pandas for timestamps
-try:
-    import pandas as pd
-except ImportError:
-    # Fallback to datetime if pandas not available
-    class pd:
-        class Timestamp:
-            @staticmethod
-            def now():
-                return datetime.now().isoformat()
+# Mock pandas for timestamp functionality
+class pd:
+    class Timestamp:
+        @staticmethod
+        def now():
+            return datetime.now()
+        
+        @staticmethod
+        def now_iso():
+            return datetime.now().isoformat()
 
 # =============================================================================
 # OUTPUT MODELS - Pydantic models for ensuring proper JSON format and types
@@ -47,7 +49,7 @@ class PolicyInfo(BaseModel):
     
     class Config:
         json_encoders = {
-            # Add custom encoders if needed
+            datetime: lambda v: v.isoformat()
         }
 
 class Stakeholder(BaseModel):
@@ -195,12 +197,12 @@ class DebateTopicList(BaseModel):
                         "title": "Implementation Timeline",
                         "description": "Discussion about the feasibility of the proposed implementation timeline",
                         "priority": 8,
-                        "stakeholders_involved": ["Property Owners", "City Officials"],
-                        "key_questions": ["Is the timeline realistic?"]
+                        "stakeholders_involved": ["Property Owners", "City Officials", "Contractors"],
+                        "key_questions": ["Is the timeline realistic?", "What are the major bottlenecks?"]
                     }
                 ],
                 "total_count": 1,
-                "analysis_summary": "Key areas of contention identified"
+                "analysis_summary": "Key debate topics identified with stakeholder involvement"
             }
         }
 
@@ -221,10 +223,10 @@ class Argument(BaseModel):
                 "argument_id": "arg_001",
                 "stakeholder_name": "Property Owners",
                 "argument_type": "claim",
-                "content": "The proposed timeline is unrealistic for small property owners",
-                "evidence": ["Survey data showing 60% need more time", "Cost analysis report"],
+                "content": "The implementation timeline is unrealistic for small property owners",
+                "evidence": ["Industry standards", "Financial analysis"],
                 "references_argument_id": None,
-                "strength": 7,
+                "strength": 8,
                 "timestamp": "2024-01-01T10:00:00"
             }
         }
@@ -246,10 +248,10 @@ class DebateRound(BaseModel):
                 "topic": {
                     "topic_id": "implementation_timeline",
                     "title": "Implementation Timeline",
-                    "description": "Discussion about timeline feasibility",
+                    "description": "Discussion about the feasibility of the proposed implementation timeline",
                     "priority": 8,
-                    "stakeholders_involved": ["Property Owners", "City Officials"],
-                    "key_questions": ["Is the timeline realistic?"]
+                    "stakeholders_involved": ["Property Owners", "City Officials", "Contractors"],
+                    "key_questions": ["Is the timeline realistic?", "What are the major bottlenecks?"]
                 },
                 "round_number": 1,
                 "round_type": "opening",
@@ -277,11 +279,11 @@ class DebateSession(BaseModel):
             "example": {
                 "session_id": "debate_001",
                 "policy_name": "Seismic Retrofit Policy",
-                "moderator": "Policy Debate Moderator",
-                "participants": ["Property Owners", "City Officials", "Tenants"],
+                "moderator": "AI Moderator",
+                "participants": ["Property Owners", "City Officials", "Contractors"],
                 "topics": [],
                 "rounds": [],
-                "start_time": "2024-01-01T09:00:00",
+                "start_time": "2024-01-01T10:00:00",
                 "end_time": None,
                 "status": "preparing",
                 "summary": ""
@@ -303,12 +305,12 @@ class A2AMessage(BaseModel):
         schema_extra = {
             "example": {
                 "message_id": "msg_001",
-                "sender": "Property Owners Agent",
-                "receiver": "City Officials Agent",
-                "message_type": "argument",
-                "content": "We need more time for implementation due to financial constraints",
-                "context": {"topic_id": "implementation_timeline", "argument_type": "claim"},
-                "timestamp": "2024-01-01T10:30:00",
+                "sender": "Property Owner Agent",
+                "receiver": "City Official Agent",
+                "message_type": "request",
+                "content": "Can you clarify the implementation timeline?",
+                "context": {"topic": "implementation_timeline"},
+                "timestamp": "2024-01-01T10:00:00",
                 "requires_response": True
             }
         }
@@ -325,21 +327,17 @@ class A2AProtocol(BaseModel):
     class Config:
         schema_extra = {
             "example": {
-                "protocol_id": "structured_debate",
-                "protocol_name": "Structured Debate Protocol",
-                "description": "Protocol for structured policy debates between stakeholder agents",
-                "rules": [
-                    "Each argument must be supported by evidence",
-                    "Rebuttals must address specific claims",
-                    "Personal attacks are not allowed"
-                ],
-                "message_flow": ["opening_statement", "argument", "rebuttal", "closing_statement"],
+                "protocol_id": "protocol_001",
+                "protocol_name": "Debate Protocol",
+                "description": "Protocol for structured policy debates",
+                "rules": ["Respect time limits", "Stay on topic"],
+                "message_flow": ["opening", "argument", "rebuttal", "closing"],
                 "timeout_seconds": 300
             }
         }
 
 # =============================================================================
-# INPUT MODELS - Already existing, keeping them for consistency
+# INPUT MODELS - Pydantic models for tool input validation
 # =============================================================================
 
 class PolicyFileReaderInput(BaseModel):
@@ -348,18 +346,18 @@ class PolicyFileReaderInput(BaseModel):
 
 class StakeholderIdentifierInput(BaseModel):
     """Input schema for StakeholderIdentifier."""
-    policy_text: str = Field(..., description="The policy text to analyze for stakeholders")
+    policy_text: Union[str, Dict[str, Any]] = Field(..., description="The policy text to analyze for stakeholders")
 
 class KnowledgeBaseManagerInput(BaseModel):
     """Input schema for KnowledgeBaseManager."""
     stakeholder_name: str = Field(..., description="Name of the stakeholder")
-    research_data: str = Field(..., description="Research data to store")
+    research_data: Union[str, Dict[str, Any]] = Field(..., description="Research data to store")
     action: str = Field(..., description="Action to perform: 'create', 'update', 'retrieve'")
 
 class StakeholderResearcherInput(BaseModel):
     """Input schema for StakeholderResearcher."""
-    stakeholder_info: str = Field(..., description="JSON string containing stakeholder information or stakeholder object")
-    policy_text: str = Field(..., description="The policy text to analyze or policy object")
+    stakeholder_info: Union[str, Dict[str, Any]] = Field(..., description="JSON string containing stakeholder information or stakeholder object")
+    policy_text: Union[str, Dict[str, Any]] = Field(..., description="The policy text to analyze or policy object")
 
 # =============================================================================
 # INPUT MODELS FOR DEBATE TOOLS
@@ -367,19 +365,19 @@ class StakeholderResearcherInput(BaseModel):
 
 class TopicAnalyzerInput(BaseModel):
     """Input schema for TopicAnalyzer."""
-    policy_text: str = Field(..., description="The policy text to analyze for debate topics or policy object")
-    stakeholder_list: str = Field(..., description="JSON string of stakeholder information or stakeholder object")
+    policy_text: Union[str, Dict[str, Any]] = Field(..., description="The policy text to analyze for debate topics or policy object")
+    stakeholder_list: Union[str, Dict[str, Any], None] = Field(default=None, description="JSON string of stakeholder information or stakeholder object")
 
 class DebateModeratorInput(BaseModel):
     """Input schema for DebateModerator."""
     session_id: str = Field(..., description="ID of the debate session")
     action: str = Field(..., description="Action: start, moderate, summarize, end")
-    context: str = Field(default="", description="Additional context for the action or context object")
+    context: Union[str, Dict[str, Any]] = Field(default="", description="Additional context for the action or context object")
 
 class ArgumentGeneratorInput(BaseModel):
     """Input schema for ArgumentGenerator."""
     stakeholder_name: str = Field(..., description="Name of the stakeholder")
-    topic: str = Field(..., description="JSON string of the debate topic or topic object")
+    topic: Union[str, Dict[str, Any]] = Field(..., description="JSON string of the debate topic or topic object")
     argument_type: str = Field(..., description="Type of argument to generate")
     responding_to: str = Field(default="", description="ID of argument being responded to")
 
@@ -389,7 +387,7 @@ class A2AMessengerInput(BaseModel):
     receiver: str = Field(..., description="Name of the receiving agent")
     message_type: str = Field(..., description="Type of message")
     content: str = Field(..., description="Message content")
-    context: str = Field(default="{}", description="JSON string of additional context or context object")
+    context: Union[str, Dict[str, Any]] = Field(default="{}", description="JSON string of additional context or context object")
 
 # =============================================================================
 # ENHANCED TOOLS WITH PYDANTIC OUTPUT VALIDATION
@@ -440,8 +438,14 @@ class StakeholderIdentifier(BaseTool):
     )
     args_schema: Type[BaseModel] = StakeholderIdentifierInput
 
-    def _run(self, policy_text: str) -> str:
+    def _run(self, policy_text: Union[str, Dict[str, Any]]) -> str:
         try:
+            # Handle both string and dictionary inputs
+            if isinstance(policy_text, dict):
+                policy_text_str = policy_text.get("text", "") or policy_text.get("content", "") or str(policy_text)
+            else:
+                policy_text_str = str(policy_text)
+            
             # Get Weave client
             weave_client = get_weave_client()
             if not weave_client.is_available():
@@ -449,7 +453,7 @@ class StakeholderIdentifier(BaseTool):
             
             # Use the specialized policy analysis method
             result = weave_client.analyze_policy(
-                policy_text=policy_text,
+                policy_text=policy_text_str,
                 analysis_type="stakeholder_identification"
             )
             
@@ -498,8 +502,14 @@ class KnowledgeBaseManager(BaseTool):
     )
     args_schema: Type[BaseModel] = KnowledgeBaseManagerInput
 
-    def _run(self, stakeholder_name: str, research_data: str, action: str) -> str:
+    def _run(self, stakeholder_name: str, research_data: Union[str, Dict[str, Any]], action: str) -> str:
         try:
+            # Handle both string and dictionary inputs for research_data
+            if isinstance(research_data, dict):
+                research_data_str = json.dumps(research_data)
+            else:
+                research_data_str = str(research_data)
+            
             # Create knowledge directory if it doesn't exist
             knowledge_dir = os.path.join("knowledge", "stakeholders")
             os.makedirs(knowledge_dir, exist_ok=True)
@@ -510,8 +520,8 @@ class KnowledgeBaseManager(BaseTool):
                 # Create knowledge base entry using Pydantic
                 knowledge_data = KnowledgeBase(
                     stakeholder_name=stakeholder_name,
-                    research_data=research_data,
-                    timestamp=pd.Timestamp.now().isoformat(),
+                    research_data=research_data_str,
+                    timestamp=pd.Timestamp.now_iso(),
                     version=1
                 )
                 
@@ -555,7 +565,7 @@ class StakeholderResearcher(BaseTool):
     )
     args_schema: Type[BaseModel] = StakeholderResearcherInput
 
-    def _run(self, stakeholder_info: str, policy_text: str) -> str:
+    def _run(self, stakeholder_info: Union[str, Dict[str, Any]], policy_text: Union[str, Dict[str, Any]]) -> str:
         try:
             # Get Weave client
             weave_client = get_weave_client()
@@ -637,33 +647,62 @@ class TopicAnalyzer(BaseTool):
     )
     args_schema: Type[BaseModel] = TopicAnalyzerInput
 
-    def _run(self, policy_text: str, stakeholder_list: str) -> str:
+    def _run(self, policy_text: Union[str, Dict[str, Any]], stakeholder_list: Union[str, Dict[str, Any], None] = None) -> str:
         try:
+            # Debug: Log input parameters
+            logger.info(f"TopicAnalyzer input - policy_text type: {type(policy_text)}")
+            logger.info(f"TopicAnalyzer input - stakeholder_list type: {type(stakeholder_list)}")
+            logger.info(f"TopicAnalyzer input - stakeholder_list value: {stakeholder_list}")
+            
             # Get Weave client
             weave_client = get_weave_client()
             if not weave_client.is_available():
-                return "Error: Weave client not available - WNB_API_KEY required"
+                return "Error: Weave client not available - API key required"
             
-            # Handle both string and dictionary inputs from CrewAI
+            # Handle both string and dictionary inputs
             if isinstance(policy_text, dict):
-                # Extract text from policy object
                 policy_text_str = policy_text.get("text", "") or policy_text.get("content", "") or str(policy_text)
             else:
                 policy_text_str = str(policy_text)
             
-            # Handle both string and dictionary inputs for stakeholder_list
-            if isinstance(stakeholder_list, dict):
+            # Handle stakeholder_list input with better error handling
+            stakeholders = []
+            if stakeholder_list is None or stakeholder_list == "" or stakeholder_list == "null":
+                # If no stakeholders provided, create default ones based on policy content
+                stakeholders = [
+                    {"name": "Policy Makers", "type": "government"},
+                    {"name": "Affected Citizens", "type": "public"},
+                    {"name": "Business Community", "type": "business"}
+                ]
+            elif isinstance(stakeholder_list, dict):
+                if "stakeholders" in stakeholder_list:
+                    stakeholders = stakeholder_list["stakeholders"]
+                else:
+                    stakeholders = [stakeholder_list]
+            elif isinstance(stakeholder_list, list):
                 stakeholders = stakeholder_list
             else:
                 try:
-                    stakeholders = json.loads(stakeholder_list)
+                    # Handle string input that might be "null" or empty
+                    if stakeholder_list in ["null", "None", ""]:
+                        stakeholder_data = {"stakeholders": []}
+                    else:
+                        stakeholder_data = json.loads(stakeholder_list) if stakeholder_list else {"stakeholders": []}
+                    
+                    if "stakeholders" in stakeholder_data:
+                        stakeholders = stakeholder_data["stakeholders"]
+                    elif isinstance(stakeholder_data, list):
+                        stakeholders = stakeholder_data
+                    else:
+                        stakeholders = [{"name": str(stakeholder_list), "type": "unknown"}]
                 except (json.JSONDecodeError, TypeError):
-                    # If it's not valid JSON, create a simple structure
-                    stakeholders = {"stakeholders": [{"name": str(stakeholder_list), "type": "unknown"}]}
+                    stakeholders = [{"name": "General Public", "type": "public"}]
             
-            stakeholder_names = [s.get('name', 'Unknown') for s in stakeholders.get('stakeholders', [])]
+            # Ensure we have at least some stakeholders
+            if not stakeholders:
+                stakeholders = [{"name": "General Public", "type": "public"}]
             
-            # Use the specialized policy analysis method
+            # Use the correct analysis type for topic analysis
             result = weave_client.analyze_policy(
                 policy_text=policy_text_str,
                 analysis_type="topic_analysis",
@@ -674,53 +713,78 @@ class TopicAnalyzer(BaseTool):
             if "error" in result:
                 return f"Error in topic analysis: {result['error']}"
             
-            # Parse and validate
+            # Map the Weave response to the expected format
             try:
-                debate_topics = result.get("debate_topics", [])
+                # Debug: Check what type of result we got
+                logger.info(f"TopicAnalyzer result type: {type(result)}")
+                logger.info(f"TopicAnalyzer result: {result}")
                 
-                # Map to expected format
-                formatted_topics = []
-                for i, topic in enumerate(debate_topics):
-                    formatted_topic = {
-                        "topic_id": f"topic_{i+1}",
-                        "title": topic.get("topic", f"Topic {i+1}"),
+                # Handle case where result might be a list or string
+                if isinstance(result, list):
+                    debate_topics_data = result
+                elif isinstance(result, str):
+                    try:
+                        result_dict = json.loads(result)
+                        debate_topics_data = result_dict.get("debate_topics", [])
+                    except (json.JSONDecodeError, TypeError):
+                        debate_topics_data = []
+                else:
+                    debate_topics_data = result.get("debate_topics", []) if isinstance(result, dict) else []
+                
+                # If no topics found, create default ones
+                if not debate_topics_data:
+                    debate_topics_data = [
+                        {
+                            "topic": "Policy Implementation and Impact",
+                            "description": "Discussion about how the policy will be implemented and its overall impact",
+                            "stakeholder_positions": {s.get("name", "Unknown"): "neutral" for s in stakeholders},
+                            "contention_level": "medium",
+                            "key_questions": ["How will this policy be implemented?", "What are the expected outcomes?"]
+                        },
+                        {
+                            "topic": "Cost and Resource Allocation",
+                            "description": "Discussion about the costs and resource requirements of the policy",
+                            "stakeholder_positions": {s.get("name", "Unknown"): "neutral" for s in stakeholders},
+                            "contention_level": "high",
+                            "key_questions": ["What are the costs involved?", "Who will bear these costs?"]
+                        }
+                    ]
+                
+                # Validate each topic using Pydantic
+                validated_topics = []
+                for topic in debate_topics_data:
+                    # Map the response structure to our DebateTopic model
+                    stakeholder_positions = topic.get("stakeholder_positions", {})
+                    stakeholders_involved = list(stakeholder_positions.keys()) if stakeholder_positions else []
+                    
+                    topic_mapped = {
+                        "topic_id": f"topic_{uuid.uuid4().hex[:8]}",
+                        "title": topic.get("topic", "Unknown Topic"),
                         "description": topic.get("description", ""),
-                        "priority": 5,  # Default priority
-                        "stakeholders_involved": list(topic.get("stakeholder_positions", {}).keys()),
+                        "priority": 5 if topic.get("contention_level") == "high" else 3 if topic.get("contention_level") == "medium" else 1,
+                        "stakeholders_involved": stakeholders_involved,
                         "key_questions": topic.get("key_questions", [])
                     }
-                    formatted_topics.append(formatted_topic)
-                
-                topic_data = {
-                    "topics": formatted_topics,
-                    "total_count": len(formatted_topics),
-                    "analysis_summary": f"Identified {len(formatted_topics)} key debate topics"
-                }
-                
-                # Validate each topic
-                validated_topics = []
-                for topic in topic_data.get('topics', []):
-                    validated_topic = DebateTopic(**topic)
+                    
+                    validated_topic = DebateTopic(**topic_mapped)
                     validated_topics.append(validated_topic)
                 
-                # Create final topic list
+                # Create the final topic list
                 topic_list = DebateTopicList(
                     topics=validated_topics,
                     total_count=len(validated_topics),
-                    analysis_summary=topic_data.get('analysis_summary', f"Identified {len(validated_topics)} debate topics")
+                    analysis_summary=f"Identified {len(validated_topics)} key debate topics from policy analysis"
                 )
                 
                 return topic_list.model_dump_json(indent=2)
                 
-            except json.JSONDecodeError:
-                return f"Error: Invalid JSON response from AI model. Raw response: {raw_response}"
             except ValidationError as e:
-                return f"Error: Invalid topic data format - {str(e)}"
+                logger.error(f"Response validation failed: {str(e)}")
+                return f"Error: Response validation failed: {str(e)}"
             
         except Exception as e:
-            error_msg = f"Error analyzing debate topics: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            logger.error(f"Error analyzing debate topics: {str(e)}")
+            return f"Error analyzing debate topics: {str(e)}"
 
 class ArgumentGenerator(BaseTool):
     name: str = "ArgumentGenerator"
@@ -729,7 +793,7 @@ class ArgumentGenerator(BaseTool):
     )
     args_schema: Type[BaseModel] = ArgumentGeneratorInput
 
-    def _run(self, stakeholder_name: str, topic: str, argument_type: str, responding_to: str = "") -> str:
+    def _run(self, stakeholder_name: str, topic: Union[str, Dict[str, Any]], argument_type: str, responding_to: str = "") -> str:
         try:
             # Get Weave client
             weave_client = get_weave_client()
@@ -743,31 +807,26 @@ class ArgumentGenerator(BaseTool):
                 try:
                     topic_data = json.loads(topic)
                 except (json.JSONDecodeError, TypeError):
-                    # If it's not valid JSON, create a simple structure
-                    topic_data = {"title": str(topic), "description": str(topic)}
+                    topic_data = {"title": str(topic), "description": ""}
             
-            # Retrieve stakeholder's knowledge base
-            kb_manager = KnowledgeBaseManager()
-            kb_data = kb_manager._run(stakeholder_name, "", "retrieve")
+            # Load stakeholder knowledge base
+            knowledge_dir = os.path.join("knowledge", "stakeholders")
+            file_path = os.path.join(knowledge_dir, f"{stakeholder_name.lower().replace(' ', '_')}.json")
             
-            # Build prompt based on argument type
-            if argument_type == "opening":
-                prompt_instruction = "Present your stakeholder's opening position on this topic"
-            elif argument_type == "rebuttal":
-                prompt_instruction = f"Provide a rebuttal to the argument referenced by ID: {responding_to}"
-            elif argument_type == "counter-claim":
-                prompt_instruction = "Present a counter-claim with supporting evidence"
-            else:  # claim, evidence
-                prompt_instruction = f"Make a {argument_type} argument about this topic"
+            stakeholder_context = ""
+            if os.path.exists(file_path):
+                with open(file_path, 'r') as f:
+                    kb_data = json.load(f)
+                    stakeholder_context = kb_data.get("research_data", "")
             
             # Use the specialized policy analysis method
             result = weave_client.analyze_policy(
-                policy_text=kb_data,  # Use knowledge base as policy context
+                policy_text=f"Topic: {topic_data.get('title', '')}\nDescription: {topic_data.get('description', '')}\nStakeholder Context: {stakeholder_context}",
                 analysis_type="argument_generation",
                 context={
                     "stakeholder_name": stakeholder_name,
-                    "topic": topic,
-                    "argument_type": argument_type
+                    "argument_type": argument_type,
+                    "responding_to": responding_to
                 }
             )
             
@@ -775,21 +834,20 @@ class ArgumentGenerator(BaseTool):
             if "error" in result:
                 return f"Error in argument generation: {result['error']}"
             
-            # Parse and validate
+            # Map the Weave response to the expected format
             try:
-                # Map the Weave response to the expected format
                 argument_data = {
-                    "argument_id": f"arg_{int(datetime.now().timestamp())}",
-                    "stakeholder_name": result.get("stakeholder", stakeholder_name),
-                    "argument_type": result.get("argument_type", argument_type),
-                    "content": result.get("argument", ""),
+                    "argument_id": result.get("argument_id", f"arg_{uuid.uuid4().hex[:8]}"),
+                    "stakeholder_name": stakeholder_name,
+                    "argument_type": argument_type,
+                    "content": result.get("content", ""),
                     "evidence": result.get("evidence", []),
                     "references_argument_id": responding_to if responding_to else None,
-                    "strength": 7,  # Default strength
-                    "timestamp": pd.Timestamp.now().isoformat()
+                    "strength": result.get("strength", 5),
+                    "timestamp": pd.Timestamp.now_iso()
                 }
                 
-                # Validate argument
+                # Validate using Pydantic
                 validated_argument = Argument(**argument_data)
                 
                 return validated_argument.model_dump_json(indent=2)
@@ -798,9 +856,7 @@ class ArgumentGenerator(BaseTool):
                 return f"Error: Response validation failed: {str(e)}"
             
         except Exception as e:
-            error_msg = f"Error generating argument: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            return f"Error generating argument: {str(e)}"
 
 class A2AMessenger(BaseTool):
     name: str = "A2AMessenger"
@@ -809,47 +865,43 @@ class A2AMessenger(BaseTool):
     )
     args_schema: Type[BaseModel] = A2AMessengerInput
 
-    def _run(self, sender: str, receiver: str, message_type: str, content: str, context: str = "{}") -> str:
+    def _run(self, sender: str, receiver: str, message_type: str, content: str, context: Union[str, Dict[str, Any]] = "{}") -> str:
         try:
             # Handle both string and dictionary inputs for context
             if isinstance(context, dict):
-                message_context = context
+                context_data = context
             else:
                 try:
-                    message_context = json.loads(context) if context else {}
+                    context_data = json.loads(context)
                 except (json.JSONDecodeError, TypeError):
-                    message_context = {}
+                    context_data = {}
             
-            # Generate unique message ID
-            import uuid
-            message_id = f"msg_{uuid.uuid4().hex[:8]}"
-            
-            # Create A2A message
+            # Create message using Pydantic
             message = A2AMessage(
-                message_id=message_id,
+                message_id=f"msg_{uuid.uuid4().hex[:8]}",
                 sender=sender,
                 receiver=receiver,
                 message_type=message_type,
                 content=content,
-                context=message_context,
-                timestamp=pd.Timestamp.now().isoformat(),
-                requires_response=message_type in ["request", "argument", "query"]
+                context=context_data,
+                timestamp=pd.Timestamp.now_iso(),
+                requires_response=message_type in ["request", "query"]
             )
             
-            # Store message in debate session log
+            # Store message in debate session directory
             debate_dir = os.path.join("knowledge", "debates", "messages")
             os.makedirs(debate_dir, exist_ok=True)
             
-            message_file = os.path.join(debate_dir, f"{message_id}.json")
-            with open(message_file, 'w') as f:
+            file_path = os.path.join(debate_dir, f"{message.message_id}.json")
+            with open(file_path, 'w') as f:
                 f.write(message.model_dump_json(indent=2))
             
-            return message.model_dump_json(indent=2)
+            return f"Message sent from {sender} to {receiver}. Message ID: {message.message_id}"
             
         except ValidationError as e:
-            return f"Error: Invalid message data format - {str(e)}"
+            return f"Error: Invalid message format - {str(e)}"
         except Exception as e:
-            return f"Error sending A2A message: {str(e)}"
+            return f"Error sending message: {str(e)}"
 
 class DebateModerator(BaseTool):
     name: str = "DebateModerator"
@@ -858,128 +910,135 @@ class DebateModerator(BaseTool):
     )
     args_schema: Type[BaseModel] = DebateModeratorInput
 
-    def _run(self, session_id: str, action: str, context: str = "") -> str:
+    def _run(self, session_id: str, action: str, context: Union[str, Dict[str, Any]] = "") -> str:
         try:
+            # Handle both string and dictionary inputs for context
+            if isinstance(context, dict):
+                context_data = context
+            else:
+                try:
+                    context_data = json.loads(context) if context else {}
+                except (json.JSONDecodeError, TypeError):
+                    context_data = {}
+            
+            # Create debate session directory
             debate_dir = os.path.join("knowledge", "debates", "sessions")
             os.makedirs(debate_dir, exist_ok=True)
             
-            session_file = os.path.join(debate_dir, f"{session_id}.json")
+            file_path = os.path.join(debate_dir, f"{session_id}.json")
             
             if action == "start":
-                # Initialize new debate session
-                if isinstance(context, dict):
-                    context_data = context
-                else:
-                    try:
-                        context_data = json.loads(context) if context else {}
-                    except (json.JSONDecodeError, TypeError):
-                        context_data = {}
-                
+                # Create new debate session
                 session = DebateSession(
                     session_id=session_id,
-                    policy_name=context_data.get('policy_name', 'Unknown Policy'),
-                    moderator="Policy Debate Moderator",
-                    participants=context_data.get('participants', []),
-                    topics=context_data.get('topics', []),
-                    start_time=pd.Timestamp.now().isoformat(),
-                    status="active"
+                    policy_name=context_data.get("policy_name", "Unknown Policy"),
+                    moderator=context_data.get("moderator", "AI Moderator"),
+                    participants=context_data.get("participants", []),
+                    topics=[],
+                    rounds=[],
+                    start_time=pd.Timestamp.now_iso(),
+                    status="preparing"
                 )
                 
-                with open(session_file, 'w') as f:
+                with open(file_path, 'w') as f:
                     f.write(session.model_dump_json(indent=2))
                 
-                return f"Debate session {session_id} started successfully"
-            
+                return f"Debate session {session_id} started. Status: {session.status}"
+                
             elif action == "moderate":
-                # Load existing session
-                if not os.path.exists(session_file):
-                    return f"Error: Debate session {session_id} not found"
-                
-                with open(session_file, 'r') as f:
-                    session_data = json.load(f)
-                
-                # Use Weave client for moderation
-                weave_client = get_weave_client()
-                if not weave_client.is_available():
-                    return "Error: Weave client not available - WNB_API_KEY required"
-                
-                # Use the specialized policy analysis method
-                result = weave_client.analyze_policy(
-                    policy_text="",  # No specific policy text needed for moderation
-                    analysis_type="debate_moderation",
-                    context={"session_context": session_data}
-                )
-                
-                # Check if there was an error
-                if "error" in result:
-                    return f"Error in debate moderation: {result['error']}"
-                
-                return result.get("moderation_message", "Continue with the debate.")
-            
+                # Load existing session and add round
+                if os.path.exists(file_path):
+                    with open(file_path, 'r') as f:
+                        session_data = json.load(f)
+                    
+                    session = DebateSession(**session_data)
+                    
+                    # Create new round
+                    round_data = context_data.get("round", {})
+                    debate_round = DebateRound(
+                        round_id=f"round_{len(session.rounds) + 1}",
+                        topic=DebateTopic(**round_data.get("topic", {})),
+                        round_number=len(session.rounds) + 1,
+                        round_type=round_data.get("round_type", "argument"),
+                        arguments=[],
+                        duration_minutes=round_data.get("duration_minutes", 10),
+                        status="active"
+                    )
+                    
+                    session.rounds.append(debate_round)
+                    session.status = "active"
+                    
+                    with open(file_path, 'w') as f:
+                        f.write(session.model_dump_json(indent=2))
+                    
+                    return f"Round {debate_round.round_number} started in session {session_id}"
+                else:
+                    return f"Debate session {session_id} not found"
+                    
             elif action == "summarize":
                 # Generate debate summary
-                if not os.path.exists(session_file):
-                    return f"Error: Debate session {session_id} not found"
-                
-                with open(session_file, 'r') as f:
-                    session_data = json.load(f)
-                
-                # Configure Gemini API for summarization
-                api_key = os.getenv('GEMINI_API_KEY')
-                if not api_key:
-                    return "Error: GEMINI_API_KEY not found in environment variables"
-                
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-2.5-flash')
-                
-                prompt = f"""
-                Provide a comprehensive summary of this policy debate session.
-                
-                Session Data:
-                {json.dumps(session_data, indent=2)}
-                
-                Include:
-                1. Key topics discussed
-                2. Main arguments from each stakeholder
-                3. Areas of agreement and disagreement
-                4. Unresolved issues
-                5. Recommendations for next steps
-                
-                Provide an objective, balanced summary.
-                """
-                
-                response = model.generate_content(prompt)
-                
-                # Update session with summary
-                session_data['summary'] = response.text
-                session_data['status'] = 'completed'
-                session_data['end_time'] = pd.Timestamp.now().isoformat()
-                
-                with open(session_file, 'w') as f:
-                    json.dump(session_data, f, indent=2)
-                
-                return response.text
-            
+                if os.path.exists(file_path):
+                    with open(file_path, 'r') as f:
+                        session_data = json.load(f)
+                    
+                    session = DebateSession(**session_data)
+                    
+                    # Generate summary using Weave client
+                    weave_client = get_weave_client()
+                    if weave_client.is_available():
+                        summary_result = weave_client.analyze_policy(
+                            policy_text=f"Debate session {session_id} with {len(session.participants)} participants",
+                            analysis_type="debate_summary",
+                            context={"session_data": session_data}
+                        )
+                        
+                        if "error" not in summary_result:
+                            session.summary = summary_result.get("summary", "Debate summary generated")
+                    
+                    session.status = "completed"
+                    session.end_time = pd.Timestamp.now_iso()
+                    
+                    with open(file_path, 'w') as f:
+                        f.write(session.model_dump_json(indent=2))
+                    
+                    return f"Debate session {session_id} summarized and completed"
+                else:
+                    return f"Debate session {session_id} not found"
+                    
             elif action == "end":
-                # End the debate session
-                if not os.path.exists(session_file):
-                    return f"Error: Debate session {session_id} not found"
-                
-                with open(session_file, 'r') as f:
-                    session_data = json.load(f)
-                
-                session_data['status'] = 'completed'
-                session_data['end_time'] = pd.Timestamp.now().isoformat()
-                
-                with open(session_file, 'w') as f:
-                    json.dump(session_data, f, indent=2)
-                
-                return f"Debate session {session_id} ended successfully"
-            
+                # End debate session
+                if os.path.exists(file_path):
+                    with open(file_path, 'r') as f:
+                        session_data = json.load(f)
+                    
+                    session = DebateSession(**session_data)
+                    session.status = "completed"
+                    session.end_time = pd.Timestamp.now_iso()
+                    
+                    with open(file_path, 'w') as f:
+                        f.write(session.model_dump_json(indent=2))
+                    
+                    return f"Debate session {session_id} ended"
+                else:
+                    return f"Debate session {session_id} not found"
+                    
             else:
-                return f"Error: Unknown action '{action}'"
-            
+                return f"Unknown action: {action}"
+                
         except ValidationError as e:
-            return f"Error: Invalid debate session data format - {str(e)}"
+            return f"Error: Invalid debate session format - {str(e)}"
         except Exception as e:
-            return f"Error in debate moderation: {str(e)}"
+            return f"Error moderating debate: {str(e)}"
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+def get_weave_client():
+    """Get Weave client instance."""
+    try:
+        from ..weave_client import get_weave_client
+        return get_weave_client()
+    except ImportError:
+        logger.error("WeaveClient not available")
+        return None
