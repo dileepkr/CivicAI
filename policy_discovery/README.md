@@ -195,13 +195,246 @@ asyncio.run(main())
 - Rate limiting for API calls
 - Intelligent cache invalidation
 
-## Integration with CivicAI
+## Agent-to-Agent (A2A) Communication Standards
 
-The Policy Discovery Agent is designed to integrate seamlessly with the broader CivicAI multi-agent system:
+The Policy Discovery Agent supports standardized A2A communication protocols, enabling seamless integration with other AI agents in multi-agent systems.
 
-- **Orchestration Agent**: Receives comprehensive policy contexts
-- **Research Agent**: Provides detailed policy background
-- **Debate Agents**: Uses policy data for informed discussions
+### A2A Interface Specification
+
+#### Standard Request Format
+
+```python
+from policy_discovery import PolicyDiscoveryAgent, UserContext, PolicyDomain, RegulationTiming
+
+# Agent-to-Agent request structure
+a2a_request = {
+    "agent_id": "requesting_agent_id",
+    "request_type": "policy_discovery",
+    "user_context": {
+        "location": "San Francisco, CA",
+        "stakeholder_roles": ["renter", "employee"],
+        "interests": ["rent control", "minimum wage"],
+        "regulation_timing": "future"  # "current", "future", or "all"
+    },
+    "search_parameters": {
+        "domains": ["housing", "labor"],  # Optional: specific domains
+        "government_levels": ["state", "local"],  # Optional: specific levels
+        "max_results": 10,  # Optional: result limit
+        "include_analysis": True  # Optional: include AI policy analysis
+    },
+    "output_format": "structured_json"  # "structured_json" or "full_objects"
+}
+```
+
+#### Standard Response Format
+
+```python
+# Agent-to-Agent response structure
+a2a_response = {
+    "agent_id": "policy_discovery_agent",
+    "request_id": "request_123",
+    "status": "success",  # "success", "partial", "error"
+    "metadata": {
+        "search_time": 3.2,
+        "total_found": 15,
+        "sources_searched": ["federal", "state", "local"],
+        "timestamp": "2025-07-13T10:30:00Z"
+    },
+    "results": {
+        "priority_ranking": [...],  # Top ranked policies
+        "by_government_level": {
+            "federal": [...],
+            "state": [...],
+            "local": [...]
+        },
+        "stakeholder_impact_map": {...},
+        "policy_analysis": {  # If requested
+            "answer": "AI-generated policy analysis",
+            "citations": [...]
+        }
+    }
+}
+```
+
+### A2A Agent Integration Examples
+
+#### Example 1: Orchestration Agent Integration
+
+```python
+class OrchestrationAgent:
+    def __init__(self):
+        self.policy_agent = PolicyDiscoveryAgent()
+    
+    async def request_policy_context(self, user_input: str, user_roles: list[str]):
+        """Request policy context for debate setup"""
+        
+        # Prepare A2A request
+        request = {
+            "agent_id": "orchestration_agent",
+            "request_type": "policy_discovery",
+            "user_context": {
+                "location": self.extract_location(user_input),
+                "stakeholder_roles": user_roles,
+                "interests": self.extract_interests(user_input),
+                "regulation_timing": "all"
+            },
+            "search_parameters": {
+                "max_results": 5,
+                "include_analysis": True
+            },
+            "output_format": "structured_json"
+        }
+        
+        # Execute policy discovery
+        context = UserContext(
+            location=request["user_context"]["location"],
+            stakeholder_roles=request["user_context"]["stakeholder_roles"],
+            interests=request["user_context"]["interests"]
+        )
+        
+        results = await self.policy_agent.discover_policies(user_context=context)
+        
+        # Return standardized A2A response
+        return {
+            "agent_id": "policy_discovery_agent",
+            "status": "success",
+            "results": {
+                "priority_ranking": [
+                    {
+                        "title": policy.title,
+                        "url": policy.url,
+                        "government_level": policy.government_level.value,
+                        "domain": policy.domain.value,
+                        "summary": policy.summary,
+                        "stakeholder_impacts": [
+                            {
+                                "group": impact.stakeholder_group,
+                                "severity": impact.impact_severity.value,
+                                "description": impact.description
+                            } for impact in policy.stakeholder_impacts
+                        ]
+                    } for policy in results.priority_ranking[:5]
+                ],
+                "policy_analysis": results.search_metadata.get("policy_analysis")
+            }
+        }
+```
+
+#### Example 2: Research Agent Integration
+
+```python
+class ResearchAgent:
+    def __init__(self):
+        self.policy_agent = PolicyDiscoveryAgent()
+    
+    async def get_policy_background(self, policy_url: str):
+        """Get detailed background for a specific policy"""
+        
+        # Use policy agent's content retrieval capabilities
+        content = await self.policy_agent.search_engine.get_policy_content([policy_url])
+        
+        # Return A2A formatted response
+        return {
+            "agent_id": "research_agent",
+            "policy_background": {
+                "url": policy_url,
+                "full_text": content.get(policy_url, {}).get("text", ""),
+                "related_policies": await self._find_related_policies(policy_url),
+                "historical_context": await self._get_historical_context(policy_url)
+            }
+        }
+```
+
+#### Example 3: Debate Agent Integration
+
+```python
+class DebateAgent:
+    def __init__(self, stakeholder_role: str):
+        self.stakeholder_role = stakeholder_role
+        self.policy_agent = PolicyDiscoveryAgent()
+    
+    async def prepare_debate_position(self, policy_topic: str, user_location: str):
+        """Prepare debate position based on policy discovery"""
+        
+        # Request relevant policies for this stakeholder
+        context = UserContext(
+            location=user_location,
+            stakeholder_roles=[self.stakeholder_role],
+            interests=[policy_topic]
+        )
+        
+        results = await self.policy_agent.discover_policies(user_context=context)
+        
+        # Analyze impact on this stakeholder
+        relevant_policies = []
+        for policy in results.priority_ranking:
+            for impact in policy.stakeholder_impacts:
+                if self.stakeholder_role in impact.stakeholder_group.lower():
+                    relevant_policies.append({
+                        "policy": policy.title,
+                        "impact": impact.description,
+                        "severity": impact.impact_severity.value,
+                        "stance_basis": policy.url
+                    })
+        
+        return {
+            "agent_id": f"debate_agent_{self.stakeholder_role}",
+            "stakeholder_position": {
+                "role": self.stakeholder_role,
+                "relevant_policies": relevant_policies,
+                "debate_readiness": len(relevant_policies) > 0
+            }
+        }
+```
+
+### A2A Protocol Standards
+
+#### Request Types Supported
+- `policy_discovery`: Standard policy search and discovery
+- `policy_analysis`: Detailed analysis of specific policies
+- `stakeholder_impact`: Impact analysis for specific stakeholder groups
+- `policy_monitoring`: Ongoing monitoring for policy updates
+- `related_policies`: Find policies related to a given policy
+
+#### Status Codes
+- `success`: Request completed successfully
+- `partial`: Request completed with some limitations/warnings
+- `error`: Request failed due to errors
+
+#### Error Handling
+```python
+# Error response format
+error_response = {
+    "agent_id": "policy_discovery_agent",
+    "status": "error",
+    "error": {
+        "code": "INVALID_LOCATION",
+        "message": "Location 'Invalid City' not supported",
+        "details": {
+            "supported_locations": ["San Francisco, CA", "California", "United States"]
+        }
+    }
+}
+```
+
+### A2A Communication Benefits
+
+1. **Standardized Interface**: Consistent request/response format across all agent interactions
+2. **Async Support**: Full async/await support for non-blocking agent communication
+3. **Type Safety**: Structured data models ensure reliable agent-to-agent data exchange
+4. **Error Handling**: Standardized error reporting for robust multi-agent systems
+5. **Extensibility**: Easy to add new request types and response formats
+6. **Scalability**: Supports concurrent requests from multiple agents
+
+### Integration with CivicAI Multi-Agent System
+
+The Policy Discovery Agent integrates seamlessly with the broader CivicAI multi-agent system through standardized A2A protocols:
+
+- **Orchestration Agent**: Receives comprehensive policy contexts for debate setup
+- **Research Agent**: Provides detailed policy background and historical context
+- **Debate Agents**: Uses policy data for informed stakeholder-specific arguments
+- **Action Agent**: Leverages policy information for personalized civic actions
+- **Monitoring Agent**: Provides ongoing policy update notifications
 
 ## Examples
 
