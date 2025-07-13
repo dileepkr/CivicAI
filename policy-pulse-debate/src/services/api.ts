@@ -424,6 +424,38 @@ export class DebateWebSocketClient {
     });
   }
 
+  sendUserInput(content: string) {
+    this.sendMessage({
+      type: 'user_input',
+      message: content,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  endDebate(reason?: string) {
+    this.sendMessage({
+      type: 'end_debate',
+      confirmation: false,
+      reason: reason || 'User requested early termination',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  confirmEndDebate(reason?: string) {
+    this.sendMessage({
+      type: 'end_debate_confirm',
+      reason: reason || 'User requested early termination',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  cancelEndDebate() {
+    this.sendMessage({
+      type: 'end_debate_cancel',
+      timestamp: new Date().toISOString()
+    });
+  }
+
   pauseDebate() {
     this.sendMessage({
       type: 'pause_debate',

@@ -493,6 +493,48 @@ async def get_debate_messages(session_id: str):
         "total_count": len(session["messages"])
     }
 
+@app.get("/debates/{session_id}/summary")
+async def get_debate_summary(session_id: str):
+    """Get the debate summary for a completed session"""
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Check if debate is completed
+    if session.get("status") not in ["completed", "terminated_early"]:
+        raise HTTPException(status_code=400, detail="Debate must be completed to get summary")
+    
+    # Find the debate summary message
+    messages = session.get("messages", [])
+    summary_message = None
+    for msg in messages:
+        if msg.get("type") == "debate_summary":
+            summary_message = msg
+            break
+    
+    if not summary_message:
+        raise HTTPException(status_code=404, detail="Debate summary not found")
+    
+    # Get additional session metadata
+    policy_name = session.get("policy_name", "Unknown Policy")
+    try:
+        policy_data = load_policy_data(policy_name)
+        policy_title = policy_data.get("title", "Unknown Policy")
+    except Exception:
+        policy_title = "Unknown Policy"
+    
+    return {
+        "session_id": session_id,
+        "policy_title": policy_title,
+        "summary": summary_message.get("content", ""),
+        "summary_timestamp": summary_message.get("timestamp", ""),
+        "debate_status": session.get("status"),
+        "stakeholder_count": session.get("stakeholder_count", 0),
+        "topics_discussed": session.get("topics_discussed", 0),
+        "total_messages": len(messages),
+        "completed_at": session.get("completed_at", "")
+    }
+
 @app.websocket("/debates/{session_id}/stream")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for real-time debate streaming"""
@@ -576,11 +618,55 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                                 "timestamp": datetime.now().isoformat()
                             }))
                         elif message_type == 'end_debate':
-                            # Handle early termination request
-                            session_manager.update_session(session_id, {"terminated_early": True})
+                            # Enhanced early termination with graceful shutdown
+                            confirmation_message = data.get('confirmation', False)
+                            reason = data.get('reason', 'User requested early termination')
+                            
+                            # Send confirmation request if not already confirmed
+                            if not confirmation_message:
+                                await websocket.send_text(json.dumps({
+                                    "type": "end_debate_confirmation",
+                                    "message": "Are you sure you want to end the debate early? This will generate a summary of the discussion so far.",
+                                    "timestamp": datetime.now().isoformat()
+                                }))
+                            else:
+                                # User confirmed, proceed with graceful termination
+                                session_manager.update_session(session_id, {
+                                    "terminated_early": True,
+                                    "termination_reason": reason,
+                                    "termination_confirmed": True,
+                                    "termination_timestamp": datetime.now().isoformat()
+                                })
+                                
+                                # Send immediate feedback
+                                await websocket.send_text(json.dumps({
+                                    "type": "debate_terminating",
+                                    "message": "Ending debate gracefully... The moderator will provide a summary of the discussion.",
+                                    "timestamp": datetime.now().isoformat()
+                                }))
+                                
+                                # The debate loop will handle the actual termination and summary generation
+                        elif message_type == 'end_debate_confirm':
+                            # Handle confirmation of early termination
+                            reason = data.get('reason', 'User requested early termination')
+                            
+                            session_manager.update_session(session_id, {
+                                "terminated_early": True,
+                                "termination_reason": reason,
+                                "termination_confirmed": True,
+                                "termination_timestamp": datetime.now().isoformat()
+                            })
+                            
                             await websocket.send_text(json.dumps({
-                                "type": "debate_terminated",
-                                "message": "Debate ended early by user request",
+                                "type": "debate_terminating",
+                                "message": "Ending debate gracefully... The moderator will provide a summary of the discussion.",
+                                "timestamp": datetime.now().isoformat()
+                            }))
+                        elif message_type == 'end_debate_cancel':
+                            # Handle cancellation of early termination
+                            await websocket.send_text(json.dumps({
+                                "type": "end_debate_cancelled",
+                                "message": "Debate termination cancelled. The discussion will continue.",
                                 "timestamp": datetime.now().isoformat()
                             }))
                         elif message_type == 'user_input':
@@ -839,7 +925,7 @@ As the moderator, generate a response that:
 Return a natural moderator response (2-3 sentences) that seamlessly integrates the user's input into the ongoing debate.
 """
             
-            result = debate_system.get_llm_response(prompt, "moderator_response")
+            result = debug_system.get_llm_response(prompt, "moderator_response")
             
             if "error" in result:
                 return f"Thank you for that input. Let me ask our stakeholders to address your point about this policy aspect."
@@ -874,9 +960,9 @@ Return a natural moderator response (2-3 sentences) that seamlessly integrates t
             "has_user_input": len(unprocessed_inputs) > 0
         }
     
-    # Function to handle user inputs during debate
+    # Enhanced function to handle user inputs during debate with dynamic direction changes
     async def handle_user_inputs(session_id: str, current_context: str):
-        """Process and respond to user inputs"""
+        """Process and respond to user inputs with dynamic discussion direction changes"""
         session = session_manager.get_session(session_id)
         if not session:
             return
@@ -887,23 +973,59 @@ Return a natural moderator response (2-3 sentences) that seamlessly integrates t
         for user_input in unprocessed_inputs:
             user_message = user_input.get('message', '')
             
-            # Generate moderator response to user input
-            moderator_response = await process_user_input(user_message, current_context)
+            # Enhanced moderator response with dynamic direction change
+            moderator_response = await generate_dynamic_moderator_response(user_message, current_context, stakeholders)
             
-            # Send moderator response
-            await send_debate_message("moderator", f"👤 I see a participant has raised a point: '{user_message}'", "user_interaction")
+            # Send moderator acknowledgment
+            await send_debate_message("moderator", f"👤 I see a community member has raised an important point: '{user_message}'", "user_interaction")
             await send_debate_message("moderator", moderator_response, "moderator_response")
             
-            # Ask stakeholders to address the user's point
-            await send_debate_message("moderator", "Let me ask our stakeholders to address this point.", "debate_message")
+            # Determine if this user input should change the discussion direction
+            should_pivot = await should_pivot_discussion(user_message, current_context)
             
-            # Get quick responses from 1-2 stakeholders on the user's point
-            for i, stakeholder in enumerate(stakeholders[:2]):  # Limit to 2 stakeholders for efficiency
-                name = stakeholder.get('name', 'Unknown')
+            if should_pivot:
+                # Create a new focused discussion based on user input
+                pivot_topic = await create_pivot_topic(user_message, current_context)
+                await send_debate_message("moderator", f"🔄 Based on this important community input, let's explore this aspect in more depth.", "debate_message")
+                await send_debate_message("moderator", f"📍 New focus area: {pivot_topic.get('title', 'Community-raised concern')}", "debate_message")
                 
-                try:
-                    # Generate response to user input
-                    response_prompt = f"""
+                # Get targeted stakeholder responses on this pivot topic
+                await send_debate_message("moderator", "Let me ask each stakeholder to specifically address this community concern.", "debate_message")
+                
+                for stakeholder in stakeholders:
+                    name = stakeholder.get('name', 'Unknown')
+                    
+                    try:
+                        # Generate targeted response to the pivot topic
+                        pivot_response = await generate_pivot_response(name, stakeholder, pivot_topic, user_message)
+                        
+                        await send_debate_message(name, pivot_response, "pivot_response", {
+                            "responding_to_user": True,
+                            "user_input": user_message[:100],
+                            "pivot_topic": pivot_topic.get('title', 'Community concern'),
+                            "response_type": "targeted_pivot"
+                        })
+                        
+                        await asyncio.sleep(0.4)
+                        
+                    except Exception as e:
+                        logger.error(f"Error generating pivot response for {name}: {e}")
+                        await send_debate_message(name, f"That's an important community concern that deserves our attention and response.", "pivot_response")
+                
+                # Moderator synthesis of the pivot discussion
+                await send_debate_message("moderator", "📝 Thank you all for addressing this community concern. This input highlights an important aspect we should keep in mind as we continue our discussion.", "debate_message")
+                
+            else:
+                # Standard response handling for non-pivot inputs
+                await send_debate_message("moderator", "Let me ask our stakeholders to briefly address this point.", "debate_message")
+                
+                # Get quick responses from 1-2 stakeholders
+                for i, stakeholder in enumerate(stakeholders[:2]):
+                    name = stakeholder.get('name', 'Unknown')
+                    
+                    try:
+                        # Generate standard response to user input
+                        response_prompt = f"""
 As {name}, respond to this user input: "{user_message}"
 
 Current debate context: {current_context}
@@ -919,29 +1041,29 @@ Return ONLY a valid JSON object:
     "content": "Your response to the user's point"
 }}
 """
-                    
-                    result = debate_system.get_llm_response(response_prompt, "user_response")
-                    
-                    if "error" not in result:
-                        if isinstance(result, dict) and 'content' in result:
-                            response_content = result['content']
-                        elif isinstance(result, str):
-                            response_content = result
+                        
+                        result = debug_system.get_llm_response(response_prompt, "user_response")
+                        
+                        if "error" not in result:
+                            if isinstance(result, dict) and 'content' in result:
+                                response_content = result['content']
+                            elif isinstance(result, str):
+                                response_content = result
+                            else:
+                                response_content = f"That's an important point to consider in our policy discussion."
                         else:
                             response_content = f"That's an important point to consider in our policy discussion."
-                    else:
-                        response_content = f"That's an important point to consider in our policy discussion."
-                    
-                    await send_debate_message(name, response_content, "user_response", {
-                        "responding_to_user": True,
-                        "user_input": user_message[:100]
-                    })
-                    
-                    await asyncio.sleep(0.3)
-                    
-                except Exception as e:
-                    logger.error(f"Error generating user response for {name}: {e}")
-                    await send_debate_message(name, "That raises important considerations for our stakeholder group.", "user_response")
+                        
+                        await send_debate_message(name, response_content, "user_response", {
+                            "responding_to_user": True,
+                            "user_input": user_message[:100]
+                        })
+                        
+                        await asyncio.sleep(0.3)
+                        
+                    except Exception as e:
+                        logger.error(f"Error generating user response for {name}: {e}")
+                        await send_debate_message(name, "That raises important considerations for our stakeholder group.", "user_response")
             
             # Mark input as processed
             user_input['processed'] = True
@@ -1219,14 +1341,24 @@ Return ONLY a valid JSON object:
         # Check if debate was terminated early
         final_status = check_session_status(session_id)
         if final_status["terminated"]:
-            # Early termination summary
-            await send_debate_message("moderator", "🎉 Thank you all for this discussion!", "debate_message")
-            await send_debate_message("moderator", "While our debate was ended early, we've had valuable insights from multiple stakeholder perspectives.", "debate_message")
+            # Enhanced early termination with comprehensive summary
+            session = session_manager.get_session(session_id)
+            termination_reason = session.get("termination_reason", "User requested early termination")
             
-            # Send early termination message
+            await send_debate_message("moderator", f"🛑 {termination_reason}", "debate_message")
+            await send_debate_message("moderator", "📋 Let me provide a summary of our discussion so far:", "debate_message")
+            
+            # Generate comprehensive summary even for early termination
+            comprehensive_summary = await generate_comprehensive_debate_summary(session_id, policy_title, debate_topics, stakeholders)
+            await send_debate_message("moderator", comprehensive_summary, "debate_summary")
+            
+            await send_debate_message("moderator", "🎉 Thank you all for this valuable discussion!", "debate_message")
+            await send_debate_message("moderator", "Even though our debate was ended early, we've gathered meaningful insights from multiple stakeholder perspectives that will inform community advocacy.", "debate_message")
+            
+            # Send early termination complete message
             await websocket.send_text(json.dumps({
                 "type": "debate_terminated_complete",
-                "message": "Debate was ended early by user request. You can still generate your personalized email based on the discussion so far.",
+                "message": "Debate ended early but with comprehensive summary generated. You can now generate your personalized email based on the discussion.",
                 "timestamp": datetime.now().isoformat()
             }))
         else:
@@ -1234,6 +1366,13 @@ Return ONLY a valid JSON object:
             await send_debate_message("moderator", "🎉 Thank you all for this comprehensive discussion!", "debate_message")
             await send_debate_message("moderator", f"We've covered {len(debate_topics)} key topics with multiple perspectives from each stakeholder group.", "debate_message")
             await send_debate_message("moderator", "This structured debate has highlighted the complexity of this policy and the importance of considering all stakeholder viewpoints.", "debate_message")
+            
+            # Generate and send comprehensive moderator summary
+            await send_debate_message("moderator", "📋 Let me provide a comprehensive summary of our discussion:", "debate_message")
+            
+            # Generate comprehensive summary of all topics and stakeholder positions
+            comprehensive_summary = await generate_comprehensive_debate_summary(session_id, policy_title, debate_topics, stakeholders)
+            await send_debate_message("moderator", comprehensive_summary, "debate_summary")
             
             # Send normal completion message
             await websocket.send_text(json.dumps({
@@ -1255,6 +1394,68 @@ Return ONLY a valid JSON object:
         logger.error(f"Error in debate streaming: {e}")
         await send_debate_message("system", f"❌ Error during debate: {str(e)}", "error")
         raise
+
+async def generate_comprehensive_debate_summary(session_id: str, policy_title: str, debate_topics: List[Dict[str, Any]], stakeholders: List[Dict[str, Any]]) -> str:
+    """Generate a comprehensive summary of the entire debate"""
+    try:
+        session = session_manager.get_session(session_id)
+        if not session:
+            return "Unable to generate summary - session not found."
+        
+        # Get all debate messages
+        messages = session.get("messages", [])
+        debate_messages = [msg for msg in messages if msg.get("type") == "debate_message" and msg.get("sender") != "moderator"]
+        
+        # Organize messages by topic
+        topic_summaries = []
+        for i, topic in enumerate(debate_topics, 1):
+            topic_title = topic.get('title', f'Topic {i}')
+            topic_messages = [msg for msg in debate_messages if msg.get('metadata', {}).get('topic') == i]
+            
+            if topic_messages:
+                # Extract key points from each stakeholder for this topic
+                stakeholder_points = {}
+                for msg in topic_messages:
+                    sender = msg.get('sender', 'Unknown')
+                    content = msg.get('content', '')
+                    if sender not in stakeholder_points:
+                        stakeholder_points[sender] = []
+                    stakeholder_points[sender].append(content)
+                
+                # Create topic summary
+                topic_summary = f"**{topic_title}:**\n"
+                for stakeholder, points in stakeholder_points.items():
+                    if points:
+                        # Use the first point as the main position
+                        main_point = points[0][:150] + "..." if len(points[0]) > 150 else points[0]
+                        topic_summary += f"• {stakeholder}: {main_point}\n"
+                
+                topic_summaries.append(topic_summary)
+        
+        # Generate overall summary
+        summary = f"**DEBATE SUMMARY: {policy_title}**\n\n"
+        summary += f"We conducted a comprehensive discussion involving {len(stakeholders)} stakeholder groups across {len(debate_topics)} key topics.\n\n"
+        
+        # Add topic summaries
+        summary += "**KEY TOPICS DISCUSSED:**\n\n"
+        for topic_summary in topic_summaries:
+            summary += topic_summary + "\n"
+        
+        # Add stakeholder overview
+        summary += "**STAKEHOLDER PERSPECTIVES:**\n"
+        for stakeholder in stakeholders:
+            name = stakeholder.get('name', 'Unknown')
+            stance = stakeholder.get('stance', stakeholder.get('likely_stance', 'neutral'))
+            summary += f"• {name} (Position: {stance})\n"
+        
+        summary += "\n**NEXT STEPS:**\n"
+        summary += "Based on this discussion, community members can now generate personalized advocacy emails to local representatives, incorporating the diverse perspectives and concerns raised by all stakeholders."
+        
+        return summary
+        
+    except Exception as e:
+        logger.error(f"Error generating comprehensive summary: {e}")
+        return f"**DEBATE SUMMARY: {policy_title}**\n\nA comprehensive discussion was held with multiple stakeholder groups covering various aspects of this policy. Community members can now generate personalized advocacy emails based on the debate content."
 
 @app.post("/crew/policy-analysis")
 async def run_agentic_policy_analysis(request: Dict[str, Any]):
@@ -1709,6 +1910,292 @@ Sincerely,
         logger.error(f"Error generating email: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/debates/{session_id}/email/generate")
+async def generate_email_from_debate(session_id: str, request: Dict[str, Any]):
+    """Generate advocacy email based on actual debate session data"""
+    try:
+        # Get the debate session
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Debate session not found")
+        
+        # Check if debate is completed
+        if session.get("status") not in ["completed", "terminated_early"]:
+            raise HTTPException(status_code=400, detail="Debate must be completed before generating email")
+        
+        # Extract parameters from request
+        user_perspective = request.get("user_perspective", "concerned_citizen")
+        user_name = request.get("user_name", "[Your Name]")
+        user_address = request.get("user_address", "[Your Address]")
+        user_contact = request.get("user_contact", "[Your Contact Information]")
+        focus_areas = request.get("focus_areas", [])  # Topics the user wants to emphasize
+        
+        # Get policy information
+        policy_name = session.get("policy_name", "Unknown Policy")
+        try:
+            policy_data = load_policy_data(policy_name)
+            policy_title = policy_data.get("title", "Unknown Policy")
+            policy_text = policy_data.get("text", "")
+        except Exception as e:
+            logger.error(f"Error loading policy data: {e}")
+            policy_title = "Unknown Policy"
+            policy_text = ""
+        
+        # Get debate messages
+        messages = session.get("messages", [])
+        debate_messages = [msg for msg in messages if msg.get("type") == "debate_message" and msg.get("sender") != "moderator"]
+        
+        # Find the debate summary if available
+        summary_message = None
+        for msg in messages:
+            if msg.get("type") == "debate_summary":
+                summary_message = msg
+                break
+        
+        # Generate enhanced email content using LLM
+        email_content = await generate_enhanced_email_content(
+            policy_title, 
+            policy_text, 
+            debate_messages, 
+            summary_message, 
+            user_perspective, 
+            focus_areas
+        )
+        
+        # Format the final email
+        formatted_email = f"""Subject: Community Input on {policy_title} - Urgent Action Needed
+
+Dear [Representative/Council Member Name],
+
+I am writing as a {user_perspective.replace('_', ' ')} to provide important community input on the {policy_title}. Our community recently held a comprehensive stakeholder discussion on this policy, and I wanted to share key insights and recommendations.
+
+{email_content}
+
+I believe these perspectives reflect the diverse concerns and interests of our community. I urge you to consider these recommendations as you move forward with this policy.
+
+I would welcome the opportunity to discuss this further and am available to provide additional input or clarification on any of these points.
+
+Thank you for your time and consideration of these important community concerns.
+
+Sincerely,
+{user_name}
+{user_address}
+{user_contact}
+
+---
+This email was generated based on a comprehensive community stakeholder debate involving multiple perspectives on {policy_title}.
+"""
+        
+        # Determine recipients based on policy type and location
+        recipients = [
+            "city.council@city.gov",
+            "mayor@city.gov",
+            "policy.committee@city.gov",
+            "public.affairs@city.gov",
+            "planning.department@city.gov"
+        ]
+        
+        # Add session metadata for tracking
+        session_manager.update_session(session_id, {
+            "email_generated": True,
+            "email_generated_at": datetime.now().isoformat(),
+            "user_perspective": user_perspective
+        })
+        
+        return {
+            "success": True,
+            "email_content": formatted_email,
+            "recipients": recipients,
+            "session_id": session_id,
+            "policy_title": policy_title,
+            "debate_message_count": len(debate_messages),
+            "generated_at": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating email from debate session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def generate_enhanced_email_content(
+    policy_title: str,
+    policy_text: str,
+    debate_messages: List[Dict[str, Any]],
+    summary_message: Optional[Dict[str, Any]],
+    user_perspective: str,
+    focus_areas: List[str]
+) -> str:
+    """Generate enhanced email content using LLM based on debate context"""
+    try:
+        # Get the comprehensive summary first - this should be the primary source
+        primary_summary = ""
+        if summary_message:
+            primary_summary = summary_message.get('content', '')
+        
+        # Extract key debate insights organized by topic
+        topic_insights = {}
+        stakeholder_positions = {}
+        
+        for msg in debate_messages:
+            sender = msg.get('sender', 'Unknown')
+            content = msg.get('content', '')
+            metadata = msg.get('metadata', {})
+            topic_title = metadata.get('topic_title', 'General Discussion')
+            
+            # Group insights by topic
+            if topic_title not in topic_insights:
+                topic_insights[topic_title] = []
+            
+            topic_insights[topic_title].append({
+                'stakeholder': sender,
+                'position': content,
+                'type': metadata.get('argument_type', 'statement')
+            })
+            
+            # Track stakeholder positions
+            if sender not in stakeholder_positions:
+                stakeholder_positions[sender] = []
+            stakeholder_positions[sender].append({
+                'topic': topic_title,
+                'position': content
+            })
+        
+        # Create rich context for email generation
+        debate_context = f"**COMPREHENSIVE DEBATE SUMMARY:**\n{primary_summary}\n\n"
+        
+        # Add detailed topic analysis
+        debate_context += "**DETAILED TOPIC ANALYSIS:**\n"
+        for topic, insights in topic_insights.items():
+            debate_context += f"\n**{topic}:**\n"
+            for insight in insights[:3]:  # Top 3 insights per topic
+                debate_context += f"- {insight['stakeholder']}: {insight['position'][:150]}...\n"
+        
+        # Add stakeholder position summary
+        debate_context += "\n**STAKEHOLDER POSITION SUMMARY:**\n"
+        for stakeholder, positions in stakeholder_positions.items():
+            debate_context += f"\n**{stakeholder}:**\n"
+            for pos in positions[:2]:  # Top 2 positions per stakeholder
+                debate_context += f"- On {pos['topic']}: {pos['position'][:100]}...\n"
+        
+        # Create focus areas context
+        focus_context = ""
+        if focus_areas:
+            focus_context = f"\n**PRIORITY FOCUS AREAS:** {', '.join(focus_areas)}"
+        
+        # Generate email content using comprehensive LLM prompt
+        email_prompt = f"""
+You are writing a professional advocacy email to local government officials about a policy based on a comprehensive community debate.
+
+Policy: {policy_title}
+User Perspective: {user_perspective}
+{focus_context}
+
+COMPREHENSIVE DEBATE CONTEXT:
+{debate_context}
+
+Generate a professional, persuasive email body that:
+1. References the comprehensive community debate as evidence of civic engagement
+2. Summarizes 3-4 key concerns that emerged from the debate discussion
+3. Presents 4-6 specific, actionable recommendations based on stakeholder input
+4. Highlights the most compelling arguments from different stakeholder perspectives
+5. Emphasizes community impact and implementation urgency
+6. Maintains respectful, professional tone appropriate for government officials
+7. Is concrete and specific, drawing from actual debate content
+8. Demonstrates broad community input and diverse stakeholder engagement
+
+Structure the email as:
+- Opening paragraph: Reference the community debate and its significance
+- Body paragraphs: Key concerns and stakeholder perspectives from the debate
+- Recommendations section: Specific actionable items based on debate outcomes
+- Closing: Emphasis on community engagement and next steps
+
+The email should be 4-5 paragraphs long and feel authentic to the actual debate content.
+Return ONLY the email body content (no subject line, no salutation, no signature).
+"""
+        
+        # Try to get enhanced content from LLM
+        try:
+            result = debug_system.get_llm_response(email_prompt, "comprehensive_email_generation")
+            
+            if "error" not in result:
+                if isinstance(result, dict) and 'content' in result:
+                    return result['content']
+                elif isinstance(result, str):
+                    return result
+                else:
+                    return str(result)
+            else:
+                logger.warning(f"LLM error in email generation: {result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            logger.error(f"Error calling LLM for email generation: {e}")
+        
+        # Enhanced fallback email generation based on actual debate content
+        email_body = f"""Our community recently conducted a comprehensive stakeholder debate on the {policy_title}, facilitated by a professional moderator and including diverse perspectives from affected community members. This structured discussion revealed critical insights that I believe warrant your immediate attention and action.
+
+**Key Community Concerns from the Debate:**
+"""
+        
+        # Add specific concerns from debate topics
+        concern_count = 0
+        for topic, insights in topic_insights.items():
+            if concern_count < 4:  # Limit to 4 key concerns
+                email_body += f"\n**{topic}:** "
+                main_concerns = []
+                for insight in insights[:2]:  # Top 2 insights per topic
+                    concern = insight['position']
+                    if len(concern) > 100:
+                        concern = concern[:100] + "..."
+                    main_concerns.append(f"{insight['stakeholder']} emphasized {concern}")
+                email_body += " ".join(main_concerns)
+                concern_count += 1
+        
+        # Add stakeholder diversity
+        email_body += f"\n\n**Community Stakeholder Engagement:**\nOur debate included {len(stakeholder_positions)} key stakeholder groups: {', '.join(stakeholder_positions.keys())}. This diverse representation demonstrates the broad community interest in this policy and the need for comprehensive implementation planning."
+        
+        # Add specific recommendations based on debate content
+        email_body += f"""
+
+**Specific Recommendations Based on Community Input:**
+
+1. **Comprehensive Implementation Planning**: Establish clear timelines and milestones for policy implementation, with regular public progress updates as requested by community stakeholders.
+
+2. **Multi-Stakeholder Advisory Committee**: Create an ongoing advisory committee including representatives from all stakeholder groups that participated in our debate to ensure continued community input.
+
+3. **Robust Enforcement Mechanisms**: Develop clear enforcement procedures with adequate resources and accountability measures, addressing concerns raised by multiple stakeholder groups.
+
+4. **Impact Assessment and Monitoring**: Implement systematic monitoring of policy impacts on different community groups, with regular review and adjustment processes.
+
+5. **Community Education and Outreach**: Establish comprehensive public education programs to ensure all affected parties understand their rights and responsibilities under the new policy.
+
+6. **Phased Implementation with Feedback Loops**: Consider a phased rollout approach that allows for community feedback and policy refinement based on real-world implementation experience.
+
+The active participation in our community debate, with {len(debate_messages)} substantive contributions from diverse stakeholders, demonstrates significant public engagement with this policy. The structured nature of our discussion revealed both the complexity of implementation challenges and the community's readiness to work collaboratively toward effective solutions.
+
+I urge you to consider these community-derived recommendations as you move forward with policy implementation. The depth of community engagement evidenced by our debate process shows that residents are prepared to be active partners in making this policy successful.
+"""
+        
+        return email_body
+        
+    except Exception as e:
+        logger.error(f"Error generating enhanced email content: {e}")
+        return f"""Our community recently held a comprehensive stakeholder debate on the {policy_title}, bringing together diverse perspectives from affected community members. This structured discussion, facilitated by a professional moderator, revealed important insights about policy implementation and community impact.
+
+The debate included multiple stakeholder groups who raised concerns about implementation timelines, enforcement mechanisms, and community impact. Based on this extensive community engagement, I recommend immediate action on several key areas:
+
+**Immediate Recommendations:**
+1. Establish transparent implementation timelines with regular community updates
+2. Create multi-stakeholder advisory committee for ongoing input
+3. Develop robust enforcement mechanisms with clear accountability
+4. Implement comprehensive impact monitoring and review processes
+5. Provide extensive community education and outreach programs
+
+The level of community engagement demonstrated by our debate process shows that residents are prepared to be active partners in policy implementation. I urge you to consider these community-derived recommendations and establish mechanisms for continued stakeholder input throughout the implementation process.
+
+This policy will significantly impact our community, and the structured debate process has provided valuable insights that can inform effective implementation strategies.
+"""
+
 @app.get("/crew/status")
 async def get_crew_system_status():
     """Get crew system status"""
@@ -1731,6 +2218,165 @@ async def get_crew_system_status():
             "message": f"Error checking status: {str(e)}",
             "components": {}
         }
+
+async def generate_dynamic_moderator_response(user_message: str, current_context: str, stakeholders: List[Dict[str, Any]]) -> str:
+    """Generate dynamic moderator response that can change discussion direction"""
+    try:
+        stakeholder_names = [s.get('name', 'Unknown') for s in stakeholders]
+        
+        prompt = f"""
+You are a professional debate moderator facilitating a policy discussion. A community member has just provided this input:
+
+User Input: "{user_message}"
+Current Context: {current_context}
+Stakeholders Present: {', '.join(stakeholder_names)}
+
+As the moderator, generate a response that:
+1. Acknowledges the user's input professionally and specifically
+2. Analyzes how their input relates to the current policy debate
+3. Determines if this input should shift the discussion focus
+4. Guides the conversation in a relevant direction based on their input
+5. Encourages specific stakeholder participation on the user's point
+6. Maintains neutrality while being responsive and engaging
+
+Generate a natural moderator response (2-3 sentences) that seamlessly integrates the user's input into the ongoing debate and shows that their input is valued and will influence the discussion.
+"""
+        
+        result = debug_system.get_llm_response(prompt, "dynamic_moderator_response")
+        
+        if "error" not in result:
+            if isinstance(result, dict) and 'content' in result:
+                return result['content']
+            elif isinstance(result, str):
+                return result
+            else:
+                return str(result)
+        else:
+            return f"Thank you for raising that important point about the policy. This community input helps us understand the real-world implications, and I'd like our stakeholders to address this concern directly."
+        
+    except Exception as e:
+        logger.error(f"Error generating dynamic moderator response: {e}")
+        return f"Thank you for that valuable community input. Let me ask our stakeholders to address your specific concerns about this policy aspect."
+
+async def should_pivot_discussion(user_message: str, current_context: str) -> bool:
+    """Determine if user input should cause a discussion pivot"""
+    try:
+        # Check if user input contains pivot indicators
+        pivot_indicators = [
+            "what about", "but what if", "have you considered", "what happens when",
+            "i'm concerned about", "the real issue is", "more importantly",
+            "actually", "however", "but", "this doesn't address", "missing",
+            "overlooked", "ignored", "forgot", "urgent", "critical", "crisis"
+        ]
+        
+        user_lower = user_message.lower()
+        
+        # Check for pivot indicators
+        has_pivot_indicator = any(indicator in user_lower for indicator in pivot_indicators)
+        
+        # Check message length (longer messages more likely to warrant pivot)
+        is_substantial = len(user_message.split()) > 10
+        
+        # Check for question marks (questions often warrant focused responses)
+        has_question = "?" in user_message
+        
+        # Simple heuristic: pivot if it has indicators AND is substantial OR has a question
+        return has_pivot_indicator and (is_substantial or has_question)
+        
+    except Exception as e:
+        logger.error(f"Error determining pivot need: {e}")
+        return False
+
+async def create_pivot_topic(user_message: str, current_context: str) -> Dict[str, Any]:
+    """Create a focused topic based on user input"""
+    try:
+        prompt = f"""
+A community member has raised an important point during a policy debate that warrants focused discussion.
+
+User Input: "{user_message}"
+Current Context: {current_context}
+
+Create a focused discussion topic based on this user input. Return a JSON object with:
+{{
+    "title": "Concise topic title (5-8 words)",
+    "description": "Brief description of what should be discussed (1-2 sentences)",
+    "key_question": "Specific question stakeholders should address"
+}}
+"""
+        
+        result = debug_system.get_llm_response(prompt, "pivot_topic_creation")
+        
+        if "error" not in result:
+            if isinstance(result, dict):
+                return result
+            else:
+                try:
+                    return json.loads(result)
+                except:
+                    pass
+        
+        # Fallback pivot topic
+        return {
+            "title": "Community-Raised Concern",
+            "description": f"Address the specific concern raised by a community member: {user_message[:100]}...",
+            "key_question": "How should this concern be addressed in the policy implementation?"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating pivot topic: {e}")
+        return {
+            "title": "Community Input Focus",
+            "description": "Address community concerns about policy implementation",
+            "key_question": "How can we address the community's concerns?"
+        }
+
+async def generate_pivot_response(stakeholder_name: str, stakeholder_data: Dict[str, Any], pivot_topic: Dict[str, Any], user_message: str) -> str:
+    """Generate targeted stakeholder response to pivot topic"""
+    try:
+        prompt = f"""
+You are {stakeholder_name} in a policy debate. A community member has raised an important concern that requires focused discussion.
+
+Community Member's Input: "{user_message}"
+Pivot Topic: {pivot_topic.get('title', 'Community Concern')}
+Topic Description: {pivot_topic.get('description', '')}
+Key Question: {pivot_topic.get('key_question', '')}
+
+Your stakeholder interests: {stakeholder_data.get('interests', [])}
+Your stakeholder concerns: {stakeholder_data.get('concerns', [])}
+
+Generate a targeted response (2-3 sentences) that:
+1. Directly addresses the community member's concern
+2. Provides your stakeholder perspective on this specific issue
+3. Offers constructive input or solutions if possible
+4. Maintains your stakeholder position while being responsive
+
+Return ONLY a valid JSON object:
+{{
+    "stakeholder_name": "{stakeholder_name}",
+    "content": "Your targeted response to the community concern"
+}}
+"""
+        
+        result = debug_system.get_llm_response(prompt, "pivot_response_generation")
+        
+        if "error" not in result:
+            if isinstance(result, dict) and 'content' in result:
+                return result['content']
+            elif isinstance(result, str):
+                try:
+                    parsed = json.loads(result)
+                    return parsed.get('content', result)
+                except:
+                    return result
+            else:
+                return str(result)
+        
+        # Fallback response
+        return f"As {stakeholder_name}, I understand this community concern and believe we need to address it seriously in our policy implementation planning."
+        
+    except Exception as e:
+        logger.error(f"Error generating pivot response for {stakeholder_name}: {e}")
+        return f"That's an important community concern that our stakeholder group takes seriously."
 
 if __name__ == "__main__":
     import uvicorn
