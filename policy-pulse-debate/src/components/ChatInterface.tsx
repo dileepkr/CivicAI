@@ -14,7 +14,9 @@ import {
   DebateMessage,
   EmailGenerationRequest,
   AgenticDebateRequest,
-  AgenticWorkflowResponse
+  AgenticWorkflowResponse,
+  createDebateWebSocket,
+  DebateWebSocketClient
 } from '@/services/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -34,6 +36,9 @@ interface ChatMessage {
     debateMessages?: DebateMessage[];
     selectedPolicy?: DiscoveredPolicy;
     messageId?: string;
+    debateMessage?: DebateMessage;
+    round?: number;
+    roundType?: string;
   };
   actions?: ChatAction[];
 }
@@ -152,6 +157,10 @@ const ChatInterface: React.FC = () => {
   const [debateMessages, setDebateMessages] = useState<DebateMessage[]>([]);
   const [isDebateActive, setIsDebateActive] = useState(false);
   const [expandedPolicies, setExpandedPolicies] = useState<Set<string>>(new Set());
+  // Add WebSocket state management
+  const [wsClient, setWsClient] = useState<DebateWebSocketClient | null>(null);
+  const [currentDebateSession, setCurrentDebateSession] = useState<string | null>(null);
+  const [isDebateConnected, setIsDebateConnected] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -169,6 +178,15 @@ const ChatInterface: React.FC = () => {
       "Hello! I'm your **SF Policy Assistant**. I can help you:\n\n• Discover relevant policies\n• Analyze their impact  \n• Facilitate discussions\n\nWhat policy area interests you today?"
     );
   }, []);
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsClient) {
+        wsClient.disconnect();
+      }
+    };
+  }, [wsClient]);
 
   const addBotMessage = (content: string, data?: ChatMessage['data'], actions?: ChatAction[]) => {
     const newMessage: ChatMessage = {
@@ -363,41 +381,120 @@ const ChatInterface: React.FC = () => {
       setIsLoading(true);
       setIsDebateActive(true);
       
-      addBotMessage("Starting stakeholder debate...");
+      addBotMessage("🎭 Starting real-time stakeholder debate...");
       
-      const debateRequest: AgenticDebateRequest = {
-        policy_id: policy.url, // Send the URL so backend can fetch full content
-        policy_title: policy.title,
-        policy_content: policy.summary || policy.content_preview || '', // Fallback content
-        stakeholder_groups: ['tenants', 'landlords', 'city_officials', 'business_owners']
-      };
+      // Use the real-time debate system instead of batch API
+      const session = await apiClient.startDebate({
+        policy_name: policy.id || `policy_${Date.now()}`,
+        system_type: 'human' // Use human system for conversational debate
+      });
 
-      const response = await apiClient.runStakeholderDebate(debateRequest);
+      setCurrentDebateSession(session.session_id);
       
-      if (response.success) {
-        setDebateMessages(response.debate_messages || []);
+      // Connect to WebSocket for real-time streaming
+      const client = createDebateWebSocket(session.session_id);
+      setWsClient(client);
+
+      // Set up WebSocket event handlers
+      client.onMessage('connection_established', (message: any) => {
+        setIsDebateConnected(true);
+        addBotMessage("🔗 Connected to real-time debate stream");
+        toast({
+          title: "Connected to debate",
+          description: "Real-time debate connection established",
+        });
+      });
+
+      client.onMessage('debate_message', (message: any) => {
+        const debateMessage: DebateMessage = {
+          id: message.id,
+          sender: message.sender,
+          content: message.content,
+          timestamp: message.timestamp,
+          message_type: message.type,
+          metadata: message.metadata || {},
+          round: message.round,
+          round_type: message.round_type
+        };
+        
+        // Add to debate messages state
+        setDebateMessages(prev => [...prev, debateMessage]);
+        
+        // Add to chat interface as a bot message
+        addBotMessage(`**${message.sender}**: ${message.content}`, {
+          type: 'debate_message',
+          debateMessage
+        });
+      });
+
+      client.onMessage('debate_step', (message: any) => {
+        addBotMessage(`🎯 ${message.message}`, { type: 'debate_step' });
+      });
+
+      client.onMessage('debate_start', (message: any) => {
+        addBotMessage(`🚀 ${message.message}`, { type: 'debate_status' });
+      });
+
+      client.onMessage('round_start', (message: any) => {
+        addBotMessage(`📋 **Round ${message.round}: ${message.round_type?.toUpperCase()}**`, { 
+          type: 'round_start',
+          round: message.round,
+          roundType: message.round_type
+        });
+      });
+
+      client.onMessage('round_complete', (message: any) => {
+        addBotMessage(`✅ Round ${message.round} completed`, { type: 'round_complete' });
+      });
+
+      client.onMessage('debate_complete', (message: any) => {
+        addBotMessage(`🎉 **Debate Complete!**\n\n${message.message}`, { type: 'debate_complete' });
         
         const actions: ChatAction[] = [
           {
             id: 'generate_email_after_debate',
             label: 'Generate Email',
             type: 'generate_email',
-            data: { policy, debateMessages: response.debate_messages }
+            data: { policy, debateMessages }
           }
         ];
 
         addBotMessage(
-          "Debate completed! Here are the key perspectives:",
-          { debateResult: response, debateMessages: response.debate_messages },
+          "You can now generate your personalized email to city council based on the debate.",
+          { debateResult: { success: true, debate_messages: debateMessages }, debateMessages },
           actions
         );
-      }
+        
+        setIsDebateActive(false);
+        setIsDebateConnected(false);
+      });
+
+      client.onMessage('error', (message: any) => {
+        addBotMessage(`❌ Error: ${message.message}`, { type: 'error' });
+        toast({
+          title: "Debate error",
+          description: message.message,
+          variant: "destructive",
+        });
+        setIsDebateActive(false);
+        setIsDebateConnected(false);
+      });
+
+      // Connect to WebSocket
+      await client.connect();
+      
     } catch (error) {
-      addBotMessage("Sorry, I encountered an error starting the debate. Please try again.");
-      console.error('Debate error:', error);
+      addBotMessage("Sorry, I encountered an error starting the real-time debate. Please try again.");
+      console.error('Real-time debate error:', error);
+      setIsDebateActive(false);
+      setIsDebateConnected(false);
+      toast({
+        title: "Error starting debate",
+        description: "Failed to connect to the real-time debate system",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
-      setIsDebateActive(false);
     }
   };
 
@@ -498,6 +595,13 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
     const userInput = inputValue.trim();
     setInputValue('');
     addUserMessage(userInput);
+
+    // If we're in an active debate, send message to the debate
+    if (isDebateActive && isDebateConnected && wsClient) {
+      wsClient.sendUserMessage(userInput);
+      addBotMessage(`**You**: ${userInput}`, { type: 'user_debate_message' });
+      return;
+    }
 
     // Use agentic policy discovery for all queries
     await handleAgenticPolicyDiscovery(userInput);
@@ -636,6 +740,93 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
       );
     }
 
+    // Handle debate messages with special styling
+    if (message.data?.type === 'debate_message') {
+      const debateMessage = message.data.debateMessage;
+      const getAgentColor = (sender: string) => {
+        const colors = {
+          'moderator': 'bg-purple-50 border-purple-200 text-purple-900',
+          'tenants': 'bg-blue-50 border-blue-200 text-blue-900',
+          'landlords': 'bg-green-50 border-green-200 text-green-900',
+          'city_officials': 'bg-yellow-50 border-yellow-200 text-yellow-900',
+          'business_owners': 'bg-red-50 border-red-200 text-red-900',
+          'housing_advocates': 'bg-indigo-50 border-indigo-200 text-indigo-900',
+          'user': 'bg-gray-50 border-gray-200 text-gray-900'
+        };
+        return colors[sender] || 'bg-gray-50 border-gray-200 text-gray-900';
+      };
+
+      return (
+        <div className="mb-4">
+          <div className={`rounded-lg p-3 border-2 ${getAgentColor(debateMessage?.sender || 'unknown')}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Badge variant="outline" className="text-xs">
+                {debateMessage?.sender || 'Unknown'}
+              </Badge>
+              {debateMessage?.round && (
+                <Badge variant="secondary" className="text-xs">
+                  Round {debateMessage.round}
+                </Badge>
+              )}
+            </div>
+            <div className="text-sm">
+              {processMarkdown(debateMessage?.content || message.content)}
+            </div>
+            <div className="text-xs opacity-60 mt-2">
+              {message.timestamp.toLocaleTimeString()}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Handle status messages (debate steps, round starts, etc.)
+    if (message.data?.type === 'debate_step' || message.data?.type === 'debate_status' || 
+        message.data?.type === 'round_start' || message.data?.type === 'round_complete') {
+      return (
+        <div className="mb-4">
+          <div className="bg-gray-100 rounded-lg p-3 border-l-4 border-l-blue-500">
+            <div className="flex items-center gap-2 mb-1">
+              <MessageCircle className="w-4 h-4 text-blue-500" />
+              <span className="text-sm font-medium text-blue-700">System</span>
+            </div>
+            <div className="text-sm text-gray-700">
+              {processMarkdown(message.content)}
+            </div>
+            <div className="text-xs opacity-60 mt-2">
+              {message.timestamp.toLocaleTimeString()}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Handle user debate messages
+    if (message.data?.type === 'user_debate_message') {
+      return (
+        <div className="flex gap-3 mb-4 justify-end">
+          <div className="flex gap-2 max-w-[85%] flex-row-reverse">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center">
+              <User size={16} />
+            </div>
+            <div className="rounded-lg p-3 bg-blue-500 text-white">
+              <div className="flex items-center gap-2 mb-1">
+                <Badge variant="outline" className="text-xs bg-blue-600 text-white border-blue-400">
+                  You (Debate)
+                </Badge>
+              </div>
+              <div className="text-sm">
+                {processMarkdown(message.content)}
+              </div>
+              <div className="text-xs opacity-80 mt-2">
+                {message.timestamp.toLocaleTimeString()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className={`flex gap-3 mb-4 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
         <div className={`flex gap-2 max-w-[85%] ${message.type === 'user' ? 'flex-row-reverse' : ''}`}>
@@ -722,106 +913,80 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      {/* Minimalistic Header */}
-      <div className="bg-white border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
-            <Bot className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">Policy Assistant</h1>
-            <p className="text-xs text-gray-600">Discover • Debate • Act</p>
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="bg-white border-b shadow-sm">
+        <div className="max-w-4xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                <Bot className="w-5 h-5 text-white" />
+              </div>
+              <h1 className="text-xl font-semibold text-gray-900">SF Policy Assistant</h1>
+            </div>
+            {/* Show debate status */}
+            {isDebateActive && (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <div className={`w-2 h-2 rounded-full ${isDebateConnected ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                  <span className="text-sm text-gray-600">
+                    {isDebateConnected ? 'Live Debate' : 'Connecting...'}
+                  </span>
+                </div>
+                {isDebateConnected && (
+                  <Badge variant="outline" className="text-xs">
+                    🎭 Multi-Agent Chat
+                  </Badge>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div key={message.id}>
-            {renderMessage(message)}
-          </div>
-        ))}
-        
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="flex gap-2">
-              <div className="w-8 h-8 rounded-full bg-gray-500 text-white flex items-center justify-center">
-                <Bot size={16} />
-              </div>
-              <div className="bg-white rounded-lg p-3 border">
-                <div className="flex items-center gap-2">
-                  <Loader2 size={16} className="animate-spin text-blue-500" />
-                  <span className="text-sm text-gray-600">Analyzing policies...</span>
-                </div>
+      <div className="flex-1 overflow-y-auto bg-gray-50">
+        <div className="max-w-4xl mx-auto p-4 space-y-4">
+          {messages.map((message) => renderMessage(message))}
+          {isLoading && (
+            <div className="flex items-center justify-center p-4">
+              <div className="flex items-center gap-2 text-gray-500">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>
+                  {isDebateActive ? 'Agents are discussing...' : 'Thinking...'}
+                </span>
               </div>
             </div>
-          </div>
-        )}
-        
-        <div ref={messagesEndRef} />
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Minimalistic Input */}
-      <div className="bg-white border-t p-4">
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="flex gap-2">
+      {/* Input */}
+      <div className="bg-white border-t shadow-sm">
+        <div className="max-w-4xl mx-auto p-4">
+          <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Ask about policies..."
+              placeholder={
+                isDebateActive && isDebateConnected 
+                  ? "Join the debate discussion..." 
+                  : "Ask about SF policies..."
+              }
+              disabled={isLoading}
               className="flex-1"
-              disabled={isLoading}
             />
-            <Button 
-              type="submit" 
-              disabled={isLoading || !inputValue.trim()}
-              className="bg-blue-500 hover:bg-blue-600"
-            >
-              <Send size={16} />
+            <Button type="submit" disabled={isLoading || !inputValue.trim()}>
+              <Send className="w-4 h-4" />
             </Button>
-          </div>
-          
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setInputValue("Find housing policies")}
-              disabled={isLoading}
-              className="text-xs"
-            >
-              Housing
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setInputValue("Transportation policies")}
-              disabled={isLoading}
-              className="text-xs"
-            >
-              Transit
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setInputValue("Business support policies")}
-              disabled={isLoading}
-              className="text-xs"
-            >
-              Business
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setInputValue("Environmental policies")}
-              disabled={isLoading}
-              className="text-xs"
-            >
-              Environment
-            </Button>
-          </div>
-        </form>
+          </form>
+          {isDebateActive && isDebateConnected && (
+            <p className="text-xs text-gray-500 mt-2">
+              💬 You can now participate in the live multi-agent debate
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

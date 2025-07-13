@@ -49,10 +49,10 @@ class HumanDebateSystem(BaseDebateSystem):
         self.moderator = HumanModerator()
         self.speaking_time = {}  # Track who's been speaking
         
-        print(f"🎭 Enhanced Human-Like Debate System Active - Session: {self.session_id}")
-        print(f"👩‍💼 Moderator: {self.moderator.name}")
+        self.log_step("System Initialization", f"Enhanced Human-Like Debate System Active - Session: {self.session_id}", "🎭")
+        self.log_step("Moderator Setup", f"Moderator: {self.moderator.name}", "👩‍💼")
         if self.weave_enabled:
-            print(f"📊 View traces at: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-human-debate")
+            self.log_step("Weave Tracing", "View traces at: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-human-debate", "📊")
     
     def _weave_op(self, func):
         """Decorator wrapper for weave operations"""
@@ -75,7 +75,7 @@ class HumanDebateSystem(BaseDebateSystem):
     
     def create_personas(self, stakeholder_list: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """Create human personas for all stakeholders"""
-        print(f"\n👥 Creating Human Personas...")
+        self.log_step("Persona Creation", "Creating Human Personas", "👥")
         
         with self._weave_attributes({
             "stakeholder_count": len(stakeholder_list),
@@ -92,10 +92,10 @@ class HumanDebateSystem(BaseDebateSystem):
                 # Initialize speaking time tracking
                 self.speaking_time[stakeholder_name] = 0
                 
-                print(f"   🎭 {persona['name']} ({stakeholder_name})")
-                print(f"      Age: {persona['age']}, Background: {persona['background'][:60]}...")
-                print(f"      Style: {persona['speech_style']}")
-                print(f"      Response Style: {persona['response_style']}")
+                self.log_agent_action("Persona Creator", f"Created {persona['name']} ({stakeholder_name})", 
+                                    f"Age: {persona['age']}, Background: {persona['background'][:60]}...\n" +
+                                    f"Style: {persona['speech_style']}\n" +
+                                    f"Response Style: {persona['response_style']}")
             
             self.personas = personas
             return personas
@@ -106,7 +106,7 @@ class HumanDebateSystem(BaseDebateSystem):
         stakeholder_name = persona['stakeholder_group']
         person_name = persona['name']
         
-        print(f"\n🗣️  {person_name} ({stakeholder_name}) speaking...")
+        self.log_agent_action(person_name, f"Speaking ({stakeholder_name})", f"Presenting {argument_type} argument")
         
         # Track speaking time
         self.speaking_time[stakeholder_name] += 1
@@ -155,7 +155,7 @@ class HumanDebateSystem(BaseDebateSystem):
     def facilitate_natural_exchange(self, personas: Dict[str, Dict[str, Any]], topic: Dict[str, Any], exchange_type: str) -> List[str]:
         """Facilitate natural back-and-forth exchange on a topic"""
         
-        print(f"\n💬 Natural Exchange: {topic.get('title', 'Discussion')}")
+        self.log_step("Natural Exchange", f"Starting discussion on: {topic.get('title', 'Discussion')}", "💬")
         
         exchanges = []
         persona_list = list(personas.values())
@@ -171,7 +171,7 @@ class HumanDebateSystem(BaseDebateSystem):
             first_speaker = persona_list[0]
             first_statement = self.generate_human_argument(first_speaker, topic, "claim")
             exchanges.append(first_statement)
-            print(f"\n{first_statement}")
+            self.log_agent_action(first_speaker['name'], "Opening Statement", first_statement)
             time.sleep(1)
             
             # Other speakers respond in turn
@@ -183,7 +183,7 @@ class HumanDebateSystem(BaseDebateSystem):
                 context = f"responding to {previous_speaker}'s points about {topic.get('title', 'this issue')}"
                 response = self.generate_human_argument(responder, topic, "rebuttal", context)
                 exchanges.append(response)
-                print(f"\n{response}")
+                self.log_agent_action(responder['name'], "Response", response)
                 time.sleep(1)
                 
                 # Moderator might interject
@@ -194,14 +194,14 @@ class HumanDebateSystem(BaseDebateSystem):
                         topic.get('title', 'this topic')
                     )
                     exchanges.append(moderator_interjection)
-                    print(f"\n{moderator_interjection}")
+                    self.log_agent_action(self.moderator.name, "Moderator Interjection", moderator_interjection)
                     time.sleep(1)
                     
                     # First speaker responds to final point
                     final_context = f"responding to {responder['name']}'s challenge"
                     final_response = self.generate_human_argument(first_speaker, topic, "rebuttal", final_context)
                     exchanges.append(final_response)
-                    print(f"\n{final_response}")
+                    self.log_agent_action(first_speaker['name'], "Final Response", final_response)
             
             # Add to conversation history
             self.conversation_history.extend(exchanges)
@@ -211,7 +211,7 @@ class HumanDebateSystem(BaseDebateSystem):
     def run_multi_topic_debate(self, personas: Dict[str, Dict[str, Any]], topics_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Run debate across multiple topics with moderator guidance"""
         
-        print(f"\n🎭 === MULTI-TOPIC DEBATE SESSION ===")
+        self.log_step("Multi-Topic Debate", "Starting multi-topic debate session", "🎭")
         
         debate_results = {
             "session_id": self.session_id,
@@ -229,7 +229,7 @@ class HumanDebateSystem(BaseDebateSystem):
         }):
             # Discuss each topic
             for topic_num, topic in enumerate(topics_list, 1):
-                print(f"\n📋 Topic {topic_num}/{len(topics_list)}: {topic.get('title', 'Unknown')}")
+                self.log_step("Topic Transition", f"Topic {topic_num}/{len(topics_list)}: {topic.get('title', 'Unknown')}", "📋")
                 
                 # Moderator introduces topic
                 if topic_num > 1:
@@ -239,7 +239,7 @@ class HumanDebateSystem(BaseDebateSystem):
                         len(topics_list)
                     )
                     debate_results["moderator_transitions"].append(transition)
-                    print(f"\n{transition}")
+                    self.log_agent_action(self.moderator.name, "Topic Transition", transition)
                     time.sleep(1)
                 
                 # Natural exchange on this topic
@@ -262,10 +262,10 @@ class HumanDebateSystem(BaseDebateSystem):
                 if topic_num < len(topics_list):
                     key_points = [f"disagreement about {topic.get('title', 'this issue')}"]
                     wrap_up = self.moderator.wrap_up_topic(topic.get('title', 'Unknown'), key_points)
-                    print(f"\n{wrap_up}")
+                    self.log_agent_action(self.moderator.name, "Topic Wrap-up", wrap_up)
                     time.sleep(1)
                 
-                print(f"\n✅ Topic {topic_num} complete")
+                self.log_step("Topic Complete", f"Topic {topic_num} complete", "✅")
                 time.sleep(2)
         
         return debate_results
@@ -291,13 +291,13 @@ class HumanDebateSystem(BaseDebateSystem):
                     personas[most_spoken]['name'], 
                     [personas[name]['name'] for name in quiet_speakers]
                 )
-                print(f"\n{interruption}")
+                self.log_agent_action(self.moderator.name, "Balance Intervention", interruption)
                 time.sleep(1)
     
     def synthesize_unbiased_conclusion(self, policy_info: Dict[str, Any], personas: Dict[str, Dict[str, Any]]) -> str:
         """Generate unbiased conclusion based on all arguments presented"""
         
-        print(f"\n📊 Synthesizing Unbiased Conclusion...")
+        self.log_step("Conclusion Synthesis", "Synthesizing Unbiased Conclusion", "📊")
         
         with self._weave_attributes({
             "total_arguments": len(self.all_arguments),
@@ -320,8 +320,8 @@ class HumanDebateSystem(BaseDebateSystem):
     def run_debate(self, policy_name: str) -> Dict[str, Any]:
         """Run complete enhanced human-like debate session with active moderator"""
         
-        print(f"\n🚀 === ENHANCED HUMAN-LIKE POLICY DEBATE: {policy_name.upper()} ===")
-        print(f"🎭 Session ID: {self.session_id}")
+        self.log_step("Debate Start", f"Enhanced Human-Like Policy Debate: {policy_name.upper()}", "🚀")
+        self.log_step("Session Info", f"Session ID: {self.session_id}", "🎭")
         
         start_time = datetime.now()
         
@@ -333,26 +333,26 @@ class HumanDebateSystem(BaseDebateSystem):
         }):
             try:
                 # Step 1: Load Policy
-                print(f"\n📄 Loading Policy...")
+                self.log_step("Policy Loading", "Loading Policy", "📄")
                 policy_info = self.load_policy(policy_name)
                 policy_text = policy_info.get("text", "")
                 
-                print(f"✅ Policy: {policy_info.get('title', 'Unknown')}")
+                self.log_step("Policy Loaded", f"Policy: {policy_info.get('title', 'Unknown')}", "✅")
                 
                 # Step 2: Identify Stakeholders
-                print(f"\n🎯 Identifying Stakeholders...")
+                self.log_step("Stakeholder Identification", "Identifying Stakeholders", "🎯")
                 stakeholder_list = self.identify_stakeholders(policy_text)
                 
                 # Step 3: Create Human Personas
                 personas = self.create_personas(stakeholder_list)
                 
                 # Step 4: Analyze Multiple Debate Topics
-                print(f"\n📋 Analyzing Debate Topics...")
+                self.log_step("Topic Analysis", "Analyzing Debate Topics", "📋")
                 topics_list = self.analyze_topics(policy_text, stakeholder_list)
                 
-                print(f"✅ Found {len(topics_list)} debate topics")
+                self.log_step("Topics Found", f"Found {len(topics_list)} debate topics", "✅")
                 for i, topic in enumerate(topics_list, 1):
-                    print(f"   {i}. {topic.get('title', 'Unknown')} (Priority: {topic.get('priority', 'N/A')})")
+                    self.log_agent_action("Topic Analyzer", f"Topic {i}", f"{topic.get('title', 'Unknown')} (Priority: {topic.get('priority', 'N/A')})")
                 
                 # Step 5: Moderator Introduction
                 participant_names = [persona['name'] for persona in personas.values()]
@@ -363,16 +363,16 @@ class HumanDebateSystem(BaseDebateSystem):
                     participant_names,
                     topic_titles
                 )
-                print(f"\n{introduction}")
+                self.log_agent_action(self.moderator.name, "Debate Introduction", introduction)
                 time.sleep(2)
                 
                 # Step 6: Enhanced Multi-Topic Debate
                 debate_results = self.run_multi_topic_debate(personas, topics_list)
                 
                 # Step 7: Unbiased Conclusion
-                print(f"\n🎯 === MODERATOR'S UNBIASED CONCLUSION ===")
+                self.log_step("Debate Conclusion", "Moderator's Unbiased Conclusion", "🎯")
                 conclusion = self.synthesize_unbiased_conclusion(policy_info, personas)
-                print(f"\n{conclusion}")
+                self.log_agent_action(self.moderator.name, "Final Conclusion", conclusion)
                 
                 # Compile final results
                 end_time = datetime.now()
@@ -391,17 +391,17 @@ class HumanDebateSystem(BaseDebateSystem):
                     "total_duration": (end_time - start_time).total_seconds()
                 }
                 
-                print(f"\n🎉 === ENHANCED DEBATE SESSION COMPLETED ===")
-                print(f"🎭 Participants: {', '.join(participant_names)}")
-                print(f"📋 Topics Covered: {len(topics_list)}")
-                print(f"📊 Total Arguments: {len(self.all_arguments)}")
-                print(f"💬 Conversation Turns: {len(self.conversation_history)}")
-                print(f"⏱️  Duration: {final_results['total_duration']:.1f} seconds")
+                self.log_step("Debate Complete", "Enhanced Debate Session Completed", "🎉")
+                self.log_step("Participants", f"Participants: {', '.join(participant_names)}", "🎭")
+                self.log_step("Topics Covered", f"Topics Covered: {len(topics_list)}", "📋")
+                self.log_step("Total Arguments", f"Total Arguments: {len(self.all_arguments)}", "📊")
+                self.log_step("Conversation Turns", f"Conversation Turns: {len(self.conversation_history)}", "💬")
+                self.log_step("Duration", f"Duration: {final_results['total_duration']:.1f} seconds", "⏱️")
                 if self.weave_enabled:
-                    print(f"🔗 View traces: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-human-debate")
+                    self.log_step("Traces", "View traces: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-human-debate", "🔗")
                 
                 return final_results
                 
             except Exception as e:
-                print(f"❌ Error in enhanced human debate: {e}")
+                self.log_step("Error", f"Error in enhanced human debate: {e}", "❌")
                 raise 
