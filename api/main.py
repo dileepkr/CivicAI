@@ -14,6 +14,23 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="pydantic")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="weave")
 
+# Initialize weave tracing
+try:
+    import weave
+    weave.init("civicai-api")
+    print("✅ Weave tracing initialized for API")
+    WEAVE_AVAILABLE = True
+except ImportError:
+    print("⚠️  Weave not available - install with: pip install weave")
+    WEAVE_AVAILABLE = False
+
+# Conditional decorator helper
+def weave_op_decorator(func):
+    """Apply weave.op decorator only if weave is available"""
+    if WEAVE_AVAILABLE:
+        return weave.op()(func)
+    return func
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -161,6 +178,7 @@ except Exception as e:
     logger.error(f"⚠️  Crew system initialization failed: {e}")
     crew_system = None
 
+@weave_op_decorator
 def load_policy_data(policy_name: str) -> Dict[str, Any]:
     """Load policy data from test_data directory"""
     policy_path = project_root / "test_data" / f"{policy_name}.json"
@@ -409,6 +427,7 @@ async def get_policy(policy_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/debates/start")
+@weave_op_decorator
 async def start_debate(request: StartDebateRequest):
     """Start a new debate session"""
     try:
@@ -632,6 +651,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session_manager.remove_websocket(session_id)
         logger.info(f"WebSocket cleaned up for session {session_id}")
 
+@weave_op_decorator
 async def run_debate_with_streaming(session_id: str, session: Dict[str, Any], websocket: WebSocket):
     """Run debate with real-time streaming"""
     try:
