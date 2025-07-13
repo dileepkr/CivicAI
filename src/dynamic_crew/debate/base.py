@@ -5,9 +5,11 @@ Base debate system with common functionality for all debate implementations.
 import os
 import json
 import uuid
+import time
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..tools.custom_tool import (
     PolicyFileReader,
@@ -96,6 +98,76 @@ class BaseDebateSystem(ABC):
         
         print(f"✅ Found {len(topics_list)} debate topics")
         return topics_list
+
+    def research_single_stakeholder(self, stakeholder: Dict[str, Any], policy_text: str) -> Dict[str, Any]:
+        """Research a single stakeholder's perspective (for parallel execution)"""
+        stakeholder_name = stakeholder.get('name', 'Unknown')
+        
+        print(f"🔍 Researching {stakeholder_name}'s perspective...")
+        
+        try:
+            research_result = self.stakeholder_researcher._run(json.dumps(stakeholder), policy_text)
+            
+            if not research_result.startswith("Error"):
+                research_data = json.loads(research_result)
+                
+                # Store in knowledge base
+                kb_result = self.kb_manager._run(stakeholder_name, research_result, "create")
+                
+                print(f"✅ Research complete for {stakeholder_name}")
+                return {
+                    'name': stakeholder_name,
+                    'research_data': research_data,
+                    'kb_result': kb_result,
+                    'status': 'success'
+                }
+            else:
+                print(f"❌ Research failed for {stakeholder_name}: {research_result}")
+                return {
+                    'name': stakeholder_name,
+                    'error': research_result,
+                    'status': 'failed'
+                }
+        except Exception as e:
+            print(f"❌ Research error for {stakeholder_name}: {e}")
+            return {
+                'name': stakeholder_name,
+                'error': str(e),
+                'status': 'error'
+            }
+
+    def research_stakeholders_parallel(self, stakeholder_list: List[Dict[str, Any]], policy_text: str) -> Dict[str, Any]:
+        """Research all stakeholders in parallel to save time"""
+        print(f"\n🔬 Starting parallel research for {len(stakeholder_list)} stakeholders...")
+        
+        start_time = time.time()
+        stakeholder_research = {}
+        
+        # Use ThreadPoolExecutor for parallel research
+        with ThreadPoolExecutor(max_workers=min(len(stakeholder_list), 5)) as executor:
+            # Submit all research tasks
+            future_to_stakeholder = {
+                executor.submit(self.research_single_stakeholder, stakeholder, policy_text): stakeholder
+                for stakeholder in stakeholder_list
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_stakeholder):
+                stakeholder = future_to_stakeholder[future]
+                result = future.result()
+                
+                if result['status'] == 'success':
+                    stakeholder_research[result['name']] = result['research_data']
+                else:
+                    print(f"⚠️ Research issues for {result['name']}: {result.get('error', 'Unknown error')}")
+        
+        end_time = time.time()
+        duration = end_time - start_time
+        
+        print(f"✅ Parallel research completed in {duration:.1f} seconds")
+        print(f"📊 Successfully researched {len(stakeholder_research)} out of {len(stakeholder_list)} stakeholders")
+        
+        return stakeholder_research
     
     def generate_argument(self, stakeholder_name: str, topic: Dict[str, Any], argument_type: str) -> str:
         """Generate argument for a stakeholder on a topic"""

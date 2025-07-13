@@ -183,24 +183,9 @@ class DebugDebateSystem(BaseDebateSystem):
             # Step 3: Create Personas
             personas = self.create_personas(stakeholders)
             
-            # Step 4: Research Phase
-            self.log_step("STEP 3", "Stakeholder research phase...", "🔬")
-            stakeholder_research = {}
-            
-            for stakeholder in stakeholders:
-                name = stakeholder.get('name', 'Unknown')
-                self.log_agent_action(f"{name} Research Agent", "Conducting policy analysis...")
-                
-                research_result = self.stakeholder_researcher._run(json.dumps(stakeholder), policy_text)
-                
-                if not research_result.startswith("Error"):
-                    stakeholder_research[name] = json.loads(research_result)
-                    
-                    # Store in knowledge base
-                    kb_result = self.kb_manager._run(name, research_result, "create")
-                    self.log_agent_action(f"{name} Research Agent", f"✅ Analysis complete", kb_result)
-                else:
-                    self.log_agent_action(f"{name} Research Agent", f"❌ Research failed", research_result)
+            # Step 4: Research Phase (Parallel)
+            self.log_step("STEP 3", "Parallel stakeholder research phase...", "🔬")
+            stakeholder_research = self.research_stakeholders_parallel(stakeholders, policy_text)
             
             # Step 5: Topic Analysis
             self.log_step("STEP 4", "Analyzing debate topics...", "📋")

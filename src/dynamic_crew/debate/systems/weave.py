@@ -328,20 +328,9 @@ class WeaveDebateSystem(BaseDebateSystem):
                 # Step 3: Create Personas
                 personas = self.create_personas(stakeholder_list)
                 
-                # Step 4: Research Stakeholder Perspectives
-                print(f"\n🔬 === RESEARCH PHASE ===")
-                stakeholder_research = {}
-                
-                for stakeholder in stakeholder_list:
-                    research_data = self.research_stakeholder_perspective(stakeholder, policy_text)
-                    stakeholder_name = stakeholder.get('name', 'Unknown')
-                    
-                    if "error" not in research_data:
-                        stakeholder_research[stakeholder_name] = research_data
-                        
-                        # Store in knowledge base
-                        kb_result = self.kb_manager._run(stakeholder_name, json.dumps(research_data), "create")
-                        print(f"   📚 Stored in KB: {kb_result}")
+                # Step 4: Research Stakeholder Perspectives (Parallel)
+                print(f"\n🔬 === PARALLEL RESEARCH PHASE ===")
+                stakeholder_research = self.research_stakeholders_parallel(stakeholder_list, policy_text)
                 
                 # Step 5: Analyze Topics
                 stakeholder_summary = {"stakeholders": stakeholder_list}
