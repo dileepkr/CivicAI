@@ -921,7 +921,7 @@ Return ONLY a valid JSON object:
 """
                     
                     result = debate_system.get_llm_response(response_prompt, "user_response")
-                    --
+                    
                     if "error" not in result:
                         if isinstance(result, dict) and 'content' in result:
                             response_content = result['content']
