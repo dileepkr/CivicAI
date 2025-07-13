@@ -542,6 +542,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             }))
                         elif message_type == 'pause_debate':
                             # Handle pause request
+                            session_manager.update_session(session_id, {"paused": True})
                             await websocket.send_text(json.dumps({
                                 "type": "debate_paused",
                                 "message": "Debate paused by user",
@@ -549,11 +550,40 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             }))
                         elif message_type == 'resume_debate':
                             # Handle resume request
+                            session_manager.update_session(session_id, {"paused": False})
                             await websocket.send_text(json.dumps({
                                 "type": "debate_resumed",
                                 "message": "Debate resumed by user",
                                 "timestamp": datetime.now().isoformat()
                             }))
+                        elif message_type == 'end_debate':
+                            # Handle early termination request
+                            session_manager.update_session(session_id, {"terminated_early": True})
+                            await websocket.send_text(json.dumps({
+                                "type": "debate_terminated",
+                                "message": "Debate ended early by user request",
+                                "timestamp": datetime.now().isoformat()
+                            }))
+                        elif message_type == 'user_input':
+                            # Handle user participation in debate
+                            user_message = data.get('message', '')
+                            if user_message:
+                                # Store user input for moderator to process
+                                session = session_manager.get_session(session_id)
+                                if session:
+                                    if 'user_inputs' not in session:
+                                        session['user_inputs'] = []
+                                    session['user_inputs'].append({
+                                        'message': user_message,
+                                        'timestamp': datetime.now().isoformat(),
+                                        'processed': False
+                                    })
+                                
+                                await websocket.send_text(json.dumps({
+                                    "type": "user_input_received",
+                                    "message": f"Moderator will address your input: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'",
+                                    "timestamp": datetime.now().isoformat()
+                                }))
                         elif message_type == 'ping':
                             # Handle ping message
                             await websocket.send_text(json.dumps({
@@ -768,6 +798,137 @@ Return ONLY a valid JSON object with this structure:
             logger.error(f"Error generating moderator summary: {e}")
             return f"Thank you for that thoughtful discussion on {topic.get('title', 'this topic')}. Let's continue with our next topic."
     
+    # Function to process user input and generate moderator response
+    async def process_user_input(user_input: str, current_context: str = "") -> str:
+        """Process user input and generate appropriate moderator response"""
+        try:
+            prompt = f"""
+You are a professional debate moderator facilitating a policy discussion. A user has just provided this input:
+
+User Input: "{user_input}"
+
+Current Context: {current_context}
+
+As the moderator, generate a response that:
+- Acknowledges the user's input professionally
+- Relates their input to the current policy debate
+- Guides the discussion in a relevant direction based on their input
+- Encourages stakeholder participation on the user's point
+- Maintains neutrality while being responsive
+
+Return a natural moderator response (2-3 sentences) that seamlessly integrates the user's input into the ongoing debate.
+"""
+            
+            result = debate_system.get_llm_response(prompt, "moderator_response")
+            
+            if "error" in result:
+                return f"Thank you for that input. Let me ask our stakeholders to address your point about this policy aspect."
+            
+            # If result is a dict with content, extract it; otherwise use the string directly
+            if isinstance(result, dict) and 'content' in result:
+                return result['content']
+            elif isinstance(result, str):
+                return result
+            else:
+                return f"Thank you for raising that point. Let's hear how our stakeholders view this aspect of the policy."
+            
+        except Exception as e:
+            logger.error(f"Error processing user input: {e}")
+            return f"Thank you for your input. Let me ask our stakeholders to address your concerns about this policy."
+    
+    # Function to check for session control flags
+    def check_session_status(session_id: str) -> Dict[str, bool]:
+        """Check if debate should be paused, terminated, or has user input"""
+        session = session_manager.get_session(session_id)
+        if not session:
+            return {"continue": True, "paused": False, "terminated": False, "has_user_input": False}
+        
+        # Check for unprocessed user inputs
+        user_inputs = session.get("user_inputs", [])
+        unprocessed_inputs = [inp for inp in user_inputs if not inp.get("processed", False)]
+        
+        return {
+            "continue": True,
+            "paused": session.get("paused", False),
+            "terminated": session.get("terminated_early", False),
+            "has_user_input": len(unprocessed_inputs) > 0
+        }
+    
+    # Function to handle user inputs during debate
+    async def handle_user_inputs(session_id: str, current_context: str):
+        """Process and respond to user inputs"""
+        session = session_manager.get_session(session_id)
+        if not session:
+            return
+        
+        user_inputs = session.get("user_inputs", [])
+        unprocessed_inputs = [inp for inp in user_inputs if not inp.get("processed", False)]
+        
+        for user_input in unprocessed_inputs:
+            user_message = user_input.get('message', '')
+            
+            # Generate moderator response to user input
+            moderator_response = await process_user_input(user_message, current_context)
+            
+            # Send moderator response
+            await send_debate_message("moderator", f"👤 I see a participant has raised a point: '{user_message}'", "user_interaction")
+            await send_debate_message("moderator", moderator_response, "moderator_response")
+            
+            # Ask stakeholders to address the user's point
+            await send_debate_message("moderator", "Let me ask our stakeholders to address this point.", "debate_message")
+            
+            # Get quick responses from 1-2 stakeholders on the user's point
+            for i, stakeholder in enumerate(stakeholders[:2]):  # Limit to 2 stakeholders for efficiency
+                name = stakeholder.get('name', 'Unknown')
+                
+                try:
+                    # Generate response to user input
+                    response_prompt = f"""
+As {name}, respond to this user input: "{user_message}"
+
+Current debate context: {current_context}
+
+Generate a brief response (1-2 sentences) that:
+- Addresses the user's point from your stakeholder perspective
+- Relates to the current policy discussion
+- Is professional and substantive
+
+Return ONLY a valid JSON object:
+{{
+    "stakeholder_name": "{name}",
+    "content": "Your response to the user's point"
+}}
+"""
+                    
+                    result = debate_system.get_llm_response(response_prompt, "user_response")
+                    --
+                    if "error" not in result:
+                        if isinstance(result, dict) and 'content' in result:
+                            response_content = result['content']
+                        elif isinstance(result, str):
+                            response_content = result
+                        else:
+                            response_content = f"That's an important point to consider in our policy discussion."
+                    else:
+                        response_content = f"That's an important point to consider in our policy discussion."
+                    
+                    await send_debate_message(name, response_content, "user_response", {
+                        "responding_to_user": True,
+                        "user_input": user_message[:100]
+                    })
+                    
+                    await asyncio.sleep(0.3)
+                    
+                except Exception as e:
+                    logger.error(f"Error generating user response for {name}: {e}")
+                    await send_debate_message(name, "That raises important considerations for our stakeholder group.", "user_response")
+            
+            # Mark input as processed
+            user_input['processed'] = True
+            
+            # Brief pause before continuing
+            await asyncio.sleep(0.5)
+    
     try:
         # Step 1: Load policy with proper error handling
         await send_debate_message("system", "📖 Loading policy document...", "status")
@@ -871,6 +1032,12 @@ Return ONLY a valid JSON object with this structure:
         debate_topics = topics[:3] if len(topics) >= 3 else topics
         
         for topic_num, topic in enumerate(debate_topics, 1):
+            # Check for early termination
+            status = check_session_status(session_id)
+            if status["terminated"]:
+                await send_debate_message("moderator", "🛑 The debate has been ended early by user request.", "debate_message")
+                break
+            
             topic_title = topic.get('title', f'Topic {topic_num}')
             topic_description = topic.get('description', '')
             
@@ -878,6 +1045,11 @@ Return ONLY a valid JSON object with this structure:
             await send_debate_message("moderator", f"📢 Topic {topic_num}: {topic_title}", "debate_message")
             if topic_description:
                 await send_debate_message("moderator", f"Let's discuss: {topic_description}", "debate_message")
+            
+            # Check for user input before starting topic
+            status = check_session_status(session_id)
+            if status["has_user_input"]:
+                await handle_user_inputs(session_id, f"Topic {topic_num}: {topic_title}")
             
             # Send topic start message
             await websocket.send_text(json.dumps({
@@ -895,6 +1067,23 @@ Return ONLY a valid JSON object with this structure:
             await send_debate_message("moderator", f"🔹 Let's hear each stakeholder's initial position on {topic_title}:", "debate_message")
             
             for stakeholder in stakeholders:
+                # Check for pause, termination, or user input
+                status = check_session_status(session_id)
+                if status["terminated"]:
+                    await send_debate_message("moderator", "🛑 The debate has been ended early by user request.", "debate_message")
+                    return
+                
+                # Handle pause
+                while status["paused"]:
+                    await asyncio.sleep(1)
+                    status = check_session_status(session_id)
+                    if status["terminated"]:
+                        return
+                
+                # Handle user input
+                if status["has_user_input"]:
+                    await handle_user_inputs(session_id, f"stakeholder initial positions on {topic_title}")
+                
                 name = stakeholder.get('name', 'Unknown')
                 
                 try:
@@ -917,11 +1106,34 @@ Return ONLY a valid JSON object with this structure:
                     logger.error(f"Error generating argument for {name}: {e}")
                     await send_debate_message(name, f"I believe this aspect of the policy requires careful consideration of all stakeholder impacts.", "debate_message")
             
+            # Check before rebuttals phase
+            status = check_session_status(session_id)
+            if status["terminated"]:
+                await send_debate_message("moderator", "🛑 The debate has been ended early by user request.", "debate_message")
+                break
+            
             # Phase 2: Rebuttals and responses
             await send_debate_message("moderator", "🔄 Now let's hear responses and rebuttals:", "debate_message")
             
             # Each stakeholder gets to respond to others
             for i, stakeholder in enumerate(stakeholders):
+                # Check session status
+                status = check_session_status(session_id)
+                if status["terminated"]:
+                    await send_debate_message("moderator", "🛑 The debate has been ended early by user request.", "debate_message")
+                    return
+                
+                # Handle pause
+                while status["paused"]:
+                    await asyncio.sleep(1)
+                    status = check_session_status(session_id)
+                    if status["terminated"]:
+                        return
+                
+                # Handle user input
+                if status["has_user_input"]:
+                    await handle_user_inputs(session_id, f"stakeholder rebuttals on {topic_title}")
+                
                 name = stakeholder.get('name', 'Unknown')
                 
                 # Create context for rebuttal based on other stakeholders' arguments
@@ -954,6 +1166,16 @@ Return ONLY a valid JSON object with this structure:
                     logger.error(f"Error generating rebuttal for {name}: {e}")
                     await send_debate_message(name, f"I'd like to add that we need to consider the broader implications of this policy aspect.", "debate_message")
             
+            # Check before moderator summary
+            status = check_session_status(session_id)
+            if status["terminated"]:
+                await send_debate_message("moderator", "🛑 The debate has been ended early by user request.", "debate_message")
+                break
+            
+            # Handle any final user input before summary
+            if status["has_user_input"]:
+                await handle_user_inputs(session_id, f"summary of {topic_title}")
+            
             # Phase 3: Moderator summary
             await send_debate_message("moderator", "📝 Let me summarize the key points from this discussion:", "debate_message")
             
@@ -974,23 +1196,39 @@ Return ONLY a valid JSON object with this structure:
                 await send_debate_message("moderator", f"Thank you all. Now let's move to our next topic.", "debate_message")
                 await asyncio.sleep(0.5)
         
-        # Final comprehensive moderator summary
-        await send_debate_message("moderator", "🎉 Thank you all for this comprehensive discussion!", "debate_message")
-        await send_debate_message("moderator", f"We've covered {len(debate_topics)} key topics with multiple perspectives from each stakeholder group.", "debate_message")
-        await send_debate_message("moderator", "This structured debate has highlighted the complexity of this policy and the importance of considering all stakeholder viewpoints.", "debate_message")
-        
-        # Send debate complete message
-        await websocket.send_text(json.dumps({
-            "type": "debate_complete",
-            "message": "Enhanced debate completed successfully. You can now generate your personalized email.",
-            "timestamp": datetime.now().isoformat()
-        }))
+        # Check if debate was terminated early
+        final_status = check_session_status(session_id)
+        if final_status["terminated"]:
+            # Early termination summary
+            await send_debate_message("moderator", "🎉 Thank you all for this discussion!", "debate_message")
+            await send_debate_message("moderator", "While our debate was ended early, we've had valuable insights from multiple stakeholder perspectives.", "debate_message")
+            
+            # Send early termination message
+            await websocket.send_text(json.dumps({
+                "type": "debate_terminated_complete",
+                "message": "Debate was ended early by user request. You can still generate your personalized email based on the discussion so far.",
+                "timestamp": datetime.now().isoformat()
+            }))
+        else:
+            # Normal completion summary
+            await send_debate_message("moderator", "🎉 Thank you all for this comprehensive discussion!", "debate_message")
+            await send_debate_message("moderator", f"We've covered {len(debate_topics)} key topics with multiple perspectives from each stakeholder group.", "debate_message")
+            await send_debate_message("moderator", "This structured debate has highlighted the complexity of this policy and the importance of considering all stakeholder viewpoints.", "debate_message")
+            
+            # Send normal completion message
+            await websocket.send_text(json.dumps({
+                "type": "debate_complete",
+                "message": "Enhanced debate completed successfully. You can now generate your personalized email.",
+                "timestamp": datetime.now().isoformat()
+            }))
         
         # Update session with results
         session_manager.update_session(session_id, {
             "current_round": len(debate_topics),
             "stakeholder_count": len(stakeholders),
-            "topics_discussed": len(debate_topics)
+            "topics_discussed": len(debate_topics),
+            "completed_at": datetime.now().isoformat(),
+            "status": "terminated_early" if final_status["terminated"] else "completed"
         })
         
     except Exception as e:
