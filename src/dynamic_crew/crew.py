@@ -1,20 +1,56 @@
-from crewai import Agent, Crew, Process, Task
+from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, crew, task
-from crewai_tools import SerperDevTool
-from crewai_tools import ScrapeWebsiteTool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from crewai_tools import SerperDevTool, ScrapeWebsiteTool
 import os
-from dynamic_crew.tools.custom_tool import (
-    PolicyFileReader, 
-    StakeholderIdentifier, 
-    KnowledgeBaseManager, 
+import logging
+from datetime import datetime
+from typing import List, Dict, Any
+
+# Import the integrated policy discovery agent
+from .policy_discovery import PolicyDiscoveryAgent, UserContext, PolicyDomain, GovernmentLevel
+
+# Import the centralized Weave client
+from .weave_client import get_weave_client, initialize_weave_client
+
+# CrewAI LLM wrapper for Weave client
+class WeaveCrewAILLM:
+    """
+    Wrapper class to make Weave client compatible with CrewAI's expected LLM interface
+    """
+    
+    def __init__(self, weave_client):
+        self.weave_client = weave_client
+        # Use the same model as the weave client
+        self.model_name = weave_client.model_name
+        self.temperature = 0.7
+    
+    def invoke(self, prompt: str, **kwargs) -> str:
+        """CrewAI compatible invoke method"""
+        return self.weave_client.generate_text(
+            prompt=prompt,
+            temperature=kwargs.get('temperature', self.temperature),
+            max_tokens=kwargs.get('max_tokens', 2048),
+            model=kwargs.get('model', self.model_name)
+        )
+    
+    def predict(self, prompt: str, **kwargs) -> str:
+        """Alternative predict method for compatibility"""
+        return self.invoke(prompt, **kwargs)
+    
+    def generate_content(self, prompt: str, **kwargs) -> str:
+        """Gemini-style interface compatibility"""
+        return self.invoke(prompt, **kwargs)
+
+from .tools.custom_tool import (
+    PolicyFileReader,
+    StakeholderIdentifier,
+    KnowledgeBaseManager,
     StakeholderResearcher,
     TopicAnalyzer,
     ArgumentGenerator,
     A2AMessenger,
     DebateModerator
 )
-from typing import List, Dict, Any
 
 @CrewBase
 class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
@@ -33,16 +69,88 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         self.a2a_messenger = A2AMessenger()
         self.debate_moderator = DebateModerator()
         
-        # Configure Gemini LLM for CrewAI
-        gemini_api_key = os.getenv('GEMINI_API_KEY')
-        if gemini_api_key:
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                google_api_key=gemini_api_key,
-                temperature=0.7
-            )
-        else:
-            raise ValueError("GEMINI_API_KEY environment variable is required")
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize the integrated policy discovery agent
+        try:
+            self.policy_discovery_client = PolicyDiscoveryAgent()
+            print("✅ Policy Discovery Agent initialized with Exa API")
+        except Exception as e:
+            print(f"⚠️  Policy Discovery Agent initialization failed: {e}")
+            self.policy_discovery_client = None
+        
+        # Initialize Weave client for LLM operations with disabled tracing for CrewAI
+        try:
+            # Completely disable Weave tracing for CrewAI operations to prevent circular references
+            os.environ['WEAVE_DISABLE_TRACING'] = '1'
+            os.environ['WEAVE_AUTO_TRACE'] = '0'
+            os.environ['WEAVE_AUTO_PATCH'] = '0'
+            os.environ['WANDB_DISABLE_TRACING'] = '1'
+            
+            self.weave_client = initialize_weave_client("civicai-policy-debate")
+            
+            # Try to create CrewAI LLM instance with Groq configuration
+            try:
+                groq_key = os.getenv('GROQ_API_KEY')
+                if groq_key:
+                    self.llm = LLM(
+                        model="llama3-8b-8192",
+                        api_base="https://api.groq.com/openai/v1",
+                        api_key=groq_key,
+                    )
+                    print("✅ CrewAI LLM configured with Groq")
+                else:
+                    # Fallback to regular OpenAI
+                    openai_key = os.getenv('OPENAI_API_KEY')
+                    if openai_key:
+                        print("⚠️  No Groq key, falling back to OpenAI")
+                        self.llm = LLM(
+                            model="gpt-3.5-turbo",
+                            api_key=openai_key,
+                        )
+                        print("✅ CrewAI LLM configured with OpenAI fallback")
+                    else:
+                        # Final fallback to WeaveCrewAILLM wrapper
+                        print("⚠️  No API keys available, using WeaveCrewAILLM wrapper")
+                        self.llm = WeaveCrewAILLM(self.weave_client)
+                
+            except Exception as llm_error:
+                print(f"⚠️  LLM configuration failed: {llm_error}")
+                
+                # Fallback to regular OpenAI
+                openai_key = os.getenv('OPENAI_API_KEY')
+                if openai_key:
+                    print("⚠️  Falling back to regular OpenAI for CrewAI LLM")
+                    self.llm = LLM(
+                        model="gpt-3.5-turbo",
+                        api_key=openai_key,
+                    )
+                    print("✅ CrewAI LLM configured with OpenAI fallback")
+                else:
+                    # Final fallback to WeaveCrewAILLM wrapper
+                    print("⚠️  No OpenAI key available, using WeaveCrewAILLM wrapper")
+                    self.llm = WeaveCrewAILLM(self.weave_client)
+            
+            # Keep the wrapper for backward compatibility
+            self.weave_llm_wrapper = WeaveCrewAILLM(self.weave_client)
+            print("✅ Weave client initialized for policy debate")
+            
+        except Exception as e:
+            print(f"⚠️  Weave client initialization failed: {e}")
+            self.weave_client = None
+            
+            # Try to create a basic LLM fallback
+            openai_key = os.getenv('OPENAI_API_KEY')
+            if openai_key:
+                print("⚠️  Using OpenAI as complete fallback")
+                self.llm = LLM(
+                    model="gpt-3.5-turbo",
+                    api_key=openai_key,
+                )
+                print("✅ Basic OpenAI LLM configured")
+            else:
+                raise ValueError("No API keys available: WNB_API_KEY and OPENAI_API_KEY are both missing")
 
     @agent
     def coordinator_agent(self) -> Agent:
@@ -54,11 +162,107 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
 
     @agent
     def policy_discovery_agent(self) -> Agent:
+        """Enhanced policy discovery agent using integrated Exa API for comprehensive policy search"""
         return Agent(
-            config=self.agents_config['policy_discovery_agent'],
+            role="Universal Policy Discovery Specialist",
+            goal="Discover and categorize relevant policies across all government levels (Federal, State of California, City of San Francisco) based on user context and stakeholder roles using integrated Exa API",
+            backstory="""You are an expert in navigating complex government policy landscapes with deep knowledge of Federal, California State, and San Francisco local governance structures. You excel at identifying policies that impact specific stakeholder groups using advanced AI-powered search capabilities through the integrated Exa API. Your expertise includes real-time policy discovery, stakeholder impact assessment, and translating complex governmental processes into actionable insights for civic engagement.""",
             tools=[self.policy_file_reader, SerperDevTool(), ScrapeWebsiteTool()],
             llm=self.llm,
+            verbose=True,
+            allow_delegation=False,
         )
+
+    async def discover_policies_for_context(self, user_location: str, stakeholder_roles: List[str], interests: List[str]) -> Dict[str, Any]:
+        """
+        Use the integrated policy discovery agent to find relevant policies with refined search capabilities
+        
+        Args:
+            user_location: User's location (e.g., "San Francisco, CA")
+            stakeholder_roles: List of stakeholder roles (e.g., ["renter", "employee"])
+            interests: List of policy interests (e.g., ["rent control", "minimum wage"])
+            
+        Returns:
+            Dictionary containing discovered policies and analysis
+        """
+        if not self.policy_discovery_client:
+            return {"error": "Policy discovery client not available"}
+        
+        try:
+            # Create user context for policy discovery with refined parameters
+            user_context = UserContext(
+                location=user_location,
+                stakeholder_roles=stakeholder_roles,
+                interests=interests
+            )
+            
+            # Discover policies using the refined integrated agent
+            results = await self.policy_discovery_client.discover_policies(user_context=user_context)
+            
+            # Return structured results with enhanced quality metrics
+            return {
+                "success": True,
+                "total_found": results.total_found,
+                "search_time": results.search_time,
+                "priority_policies": [
+                    {
+                        "id": f"policy_{i}",
+                        "title": policy.title,
+                        "url": policy.url,
+                        "government_level": policy.government_level.value,
+                        "domain": policy.domain.value,
+                        "summary": policy.summary,
+                        "status": policy.status.value,
+                        "source_agency": policy.source_agency,
+                        "document_type": policy.document_type,
+                        "last_updated": policy.last_updated.isoformat() if policy.last_updated else None,
+                        "confidence_score": policy.confidence_score,
+                        "content_preview": policy.content_preview,
+                        "stakeholder_impacts": [
+                            {
+                                "group": impact.stakeholder_group,
+                                "severity": impact.impact_severity.value,
+                                "description": impact.description,
+                                "affected_areas": impact.affected_areas
+                            } for impact in policy.stakeholder_impacts
+                        ]
+                    } for i, policy in enumerate(results.priority_ranking[:15])  # Top 15 policies for better coverage
+                ],
+                "stakeholder_impact_map": {
+                    role: [
+                        {
+                            "id": f"policy_{j}",
+                            "title": policy.title,
+                            "url": policy.url,
+                            "government_level": policy.government_level.value,
+                            "domain": policy.domain.value,
+                            "summary": policy.summary,
+                            "confidence_score": policy.confidence_score,
+                            "document_type": policy.document_type,
+                            "source_agency": policy.source_agency
+                        } for j, policy in enumerate(policies[:5])  # Limit to top 5 per role
+                    ] for role, policies in results.stakeholder_impact_map.items()
+                },
+                "search_metadata": {
+                    "domains_searched": results.search_metadata.get("domains_searched", []),
+                    "levels_searched": results.search_metadata.get("levels_searched", []),
+                    "search_quality_score": sum(p.confidence_score for p in results.priority_ranking[:10]) / min(10, len(results.priority_ranking)) if results.priority_ranking else 0,
+                    "recent_policies_count": len([p for p in results.priority_ranking if p.last_updated and (datetime.now() - p.last_updated).days <= 90]),
+                    "high_confidence_count": len([p for p in results.priority_ranking if p.confidence_score >= 0.8]),
+                    "document_types": {
+                        doc_type: len([p for p in results.priority_ranking if p.document_type == doc_type])
+                        for doc_type in set(p.document_type for p in results.priority_ranking)
+                    },
+                    "government_levels": {
+                        level.value: len([p for p in results.priority_ranking if p.government_level == level])
+                        for level in set(p.government_level for p in results.priority_ranking)
+                    }
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Policy discovery failed: {str(e)}")
+            return {"error": f"Policy discovery failed: {str(e)}"}
 
     @agent
     def policy_debate_agent(self) -> Agent:
@@ -71,6 +275,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
                 ScrapeWebsiteTool()
             ],
             llm=self.llm,
+            allow_delegation=False,  # Prevent delegation, use tools directly
         )
 
     @agent
@@ -86,6 +291,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
                 ScrapeWebsiteTool()
             ],
             llm=self.llm,
+            allow_delegation=False,  # Prevent delegation, use tools directly
         )
 
     @agent
@@ -94,6 +300,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
             config=self.agents_config['action_agent'],
             tools=[self.knowledge_base_manager],
             llm=self.llm,
+            allow_delegation=False,  # Prevent delegation, use tools directly
         )
 
     @agent
@@ -108,6 +315,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
                 SerperDevTool()
             ],
             llm=self.llm,
+            allow_delegation=False,  # Prevent delegation, use tools directly
         )
 
     def create_stakeholder_agent(self, stakeholder_info: Dict[str, Any]) -> Agent:
@@ -129,7 +337,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
             goal=agent_config["goal"],
             backstory=agent_config["backstory"],
             verbose=agent_config["verbose"],
-            allow_delegation=agent_config["allow_delegation"],
+            allow_delegation=False,  # Always disable delegation for stakeholder agents
             tools=[
                 self.stakeholder_researcher,
                 self.knowledge_base_manager,
@@ -147,105 +355,318 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         """Create a task for a stakeholder agent"""
         stakeholder_name = stakeholder_info.get("name", "Unknown Stakeholder")
         
-        task_config = {
-            "description": f"Research and analyze the policy from {stakeholder_name}'s perspective. Use the StakeholderResearcher tool to conduct detailed analysis and store findings in the knowledge base.",
-            "expected_output": f"Comprehensive analysis of policy impacts on {stakeholder_name}, including key arguments, concerns, and recommendations.",
-            "agent": agent,
-            "tools": [self.stakeholder_researcher, self.knowledge_base_manager]
-        }
-        
+        # Create task with minimal agent reference to avoid circular references
+        # Use agent name instead of full agent object when possible
         task = Task(
-            description=task_config["description"],
-            expected_output=task_config["expected_output"],
-            agent=task_config["agent"],
-            tools=task_config["tools"]
+            description=f"Research and analyze the policy from {stakeholder_name}'s perspective. Use the StakeholderResearcher tool to conduct detailed analysis and store findings in the knowledge base.",
+            expected_output=f"Comprehensive analysis of policy impacts on {stakeholder_name}, including key arguments, concerns, and recommendations.",
+            agent=agent,
+            tools=[self.stakeholder_researcher, self.knowledge_base_manager]
         )
         
         return task
 
+    def create_task_without_circular_refs(self, description: str, expected_output: str, agent: Agent, tools: List = None) -> Task:
+        """Create a task without circular references by using minimal agent information"""
+        # Create a simplified task that avoids circular references
+        task = Task(
+            description=description,
+            expected_output=expected_output,
+            agent=agent,
+            tools=tools or []
+        )
+        return task
+
     @task
     def receive_query_task(self) -> Task:
+        task_config = self.tasks_config['receive_query_task']
         return Task(
-            config=self.tasks_config['receive_query_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.coordinator_agent(),
             tools=[self.policy_file_reader],
         )
 
     @task
     def fetch_policy_text_task(self) -> Task:
+        task_config = self.tasks_config['fetch_policy_text_task']
         return Task(
-            config=self.tasks_config['fetch_policy_text_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.policy_discovery_agent(),
             tools=[self.policy_file_reader, SerperDevTool(), ScrapeWebsiteTool()],
         )
 
     @task
     def analyze_policy_text_task(self) -> Task:
+        task_config = self.tasks_config['analyze_policy_text_task']
         return Task(
-            config=self.tasks_config['analyze_policy_text_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.policy_debate_agent(),
             tools=[self.stakeholder_identifier],
         )
 
     @task
     def dynamic_sub_agent_creation_task(self) -> Task:
+        task_config = self.tasks_config['dynamic_sub_agent_creation_task']
         return Task(
-            config=self.tasks_config['dynamic_sub_agent_creation_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.policy_debate_agent(),
             tools=[self.stakeholder_identifier, self.knowledge_base_manager],
         )
 
     @task
     def stakeholder_analysis_task(self) -> Task:
+        task_config = self.tasks_config['stakeholder_analysis_task']
         return Task(
-            config=self.tasks_config['stakeholder_analysis_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.advocate_sub_agents(),
             tools=[self.stakeholder_researcher, self.knowledge_base_manager],
         )
 
     @task
     def synthesize_summary_task(self) -> Task:
+        task_config = self.tasks_config['synthesize_summary_task']
         return Task(
-            config=self.tasks_config['synthesize_summary_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.action_agent(),
             tools=[self.knowledge_base_manager],
         )
 
     @task
     def draft_email_task(self) -> Task:
+        task_config = self.tasks_config['draft_email_task']
         return Task(
-            config=self.tasks_config['draft_email_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.action_agent(),
             tools=[self.knowledge_base_manager],
         )
 
     @task
     def analyze_debate_topics_task(self) -> Task:
+        task_config = self.tasks_config['analyze_debate_topics_task']
         return Task(
-            config=self.tasks_config['analyze_debate_topics_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.debate_moderator_agent(),
             tools=[self.topic_analyzer],
         )
 
     @task
     def initiate_debate_session_task(self) -> Task:
+        task_config = self.tasks_config['initiate_debate_session_task']
         return Task(
-            config=self.tasks_config['initiate_debate_session_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.debate_moderator_agent(),
             tools=[self.debate_moderator, self.knowledge_base_manager],
         )
 
     @task
     def conduct_stakeholder_debate_task(self) -> Task:
+        task_config = self.tasks_config['conduct_stakeholder_debate_task']
         return Task(
-            config=self.tasks_config['conduct_stakeholder_debate_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.advocate_sub_agents(),
             tools=[self.argument_generator, self.a2a_messenger, self.knowledge_base_manager],
         )
 
     @task
     def moderate_debate_flow_task(self) -> Task:
+        task_config = self.tasks_config['moderate_debate_flow_task']
         return Task(
-            config=self.tasks_config['moderate_debate_flow_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.debate_moderator_agent(),
             tools=[self.debate_moderator, self.a2a_messenger],
         )
 
     @task
     def summarize_debate_outcomes_task(self) -> Task:
+        task_config = self.tasks_config['summarize_debate_outcomes_task']
         return Task(
-            config=self.tasks_config['summarize_debate_outcomes_task'],
+            description=task_config['description'],
+            expected_output=task_config['expected_output'],
+            agent=self.debate_moderator_agent(),
             tools=[self.debate_moderator, self.knowledge_base_manager],
         )
+
+    def preflight_health_check(self):
+        """Check LLM and tool availability before running workflow."""
+        errors = []
+        # Check LLM
+        try:
+            from .weave_client import get_weave_client
+            weave_client = get_weave_client()
+            if not weave_client.is_available():
+                errors.append("No available LLM (Groq or OpenAI API key missing)")
+        except Exception as e:
+            errors.append(f"LLM health check failed: {e}")
+        # Check tools
+        try:
+            _ = self.stakeholder_researcher
+            _ = self.knowledge_base_manager
+            _ = self.argument_generator
+            _ = self.a2a_messenger
+            _ = self.debate_moderator
+            _ = self.policy_file_reader
+            _ = self.stakeholder_identifier
+            _ = self.topic_analyzer
+        except Exception as e:
+            errors.append(f"Tool import/instantiation failed: {e}")
+        return errors
+
+    def run_debate_workflow(self, policy_text, stakeholder_list):
+        """Run the full debate workflow with robust error handling."""
+        logger = logging.getLogger("debate_orchestration")
+        results = {}
+        errors = []
+        # 1. Preflight health check
+        health_errors = self.preflight_health_check()
+        if health_errors:
+            logger.error(f"Preflight health check failed: {health_errors}")
+            return {"success": False, "errors": health_errors}
+        logger.info("Preflight health check passed.")
+
+        # 2. Setup agents (explicit, robust)
+        try:
+            # Coordinator
+            coordinator = self.coordinator_agent()
+            # Policy discovery
+            policy_discovery = self.policy_discovery_agent()
+            # Policy debate
+            debate_agent = self.policy_debate_agent()
+            # Action agent
+            action_agent = self.action_agent()
+            # Moderator
+            moderator_agent = self.debate_moderator_agent()
+            # Stakeholder agents
+            stakeholder_agents = [self.create_stakeholder_agent(s) for s in stakeholder_list]
+        except Exception as e:
+            logger.error(f"Agent setup failed: {e}")
+            errors.append(f"Agent setup failed: {e}")
+            return {"success": False, "errors": errors}
+
+        # 3. Setup tasks (explicit, robust, clear descriptions)
+        try:
+            # Policy discovery task
+            discovery_task = Task(
+                description=(
+                    "Use the policy discovery tools to find relevant policies for the following context. "
+                    f"Policy text: {policy_text}\nStakeholders: {stakeholder_list}\n"
+                    "Return a list of relevant policies."
+                ),
+                expected_output="List of relevant policies.",
+                agent=policy_discovery,
+            )
+            # Stakeholder identification
+            stakeholder_id_task = Task(
+                description=(
+                    "Use the StakeholderIdentifier tool to identify main stakeholders in the following policy. "
+                    f"Policy text: {policy_text}\n"
+                    "Return a list of stakeholders with their interests and stances."
+                ),
+                expected_output="List of stakeholders with interests and stances.",
+                agent=debate_agent,
+            )
+            # Stakeholder research (for each stakeholder)
+            stakeholder_research_tasks = []
+            for s, agent in zip(stakeholder_list, stakeholder_agents):
+                stakeholder_research_tasks.append(Task(
+                    description=(
+                        "Use the StakeholderResearcher tool to analyze the following policy for this stakeholder. "
+                        f"Stakeholder: {s}\nPolicy: {policy_text}\n"
+                        "Store findings in the knowledge base using KnowledgeBaseManager."
+                    ),
+                    expected_output=f"Research report for {s.get('name', 'stakeholder')}",
+                    agent=agent,
+                ))
+            # Topic analysis
+            topic_task = Task(
+                description=(
+                    "Use the TopicAnalyzer tool to identify key debate topics and areas of contention for the following policy and stakeholders. "
+                    f"Policy: {policy_text}\nStakeholders: {stakeholder_list}\n"
+                    "Return a list of debate topics."
+                ),
+                expected_output="List of debate topics.",
+                agent=moderator_agent,
+            )
+            # Argument generation (for each stakeholder)
+            argument_tasks = []
+            for s, agent in zip(stakeholder_list, stakeholder_agents):
+                argument_tasks.append(Task(
+                    description=(
+                        "Use the ArgumentGenerator tool to generate an opening argument for this stakeholder on the main debate topic. "
+                        f"Stakeholder: {s}\nPolicy: {policy_text}\n"
+                        "Return the argument as structured text."
+                    ),
+                    expected_output=f"Opening argument for {s.get('name', 'stakeholder')}",
+                    agent=agent,
+                ))
+            # Synthesis
+            synthesis_task = Task(
+                description=(
+                    "Use the KnowledgeBaseManager tool to synthesize all stakeholder research into a summary. "
+                    f"Stakeholders: {stakeholder_list}\nPolicy: {policy_text}\n"
+                    "Return a balanced summary."
+                ),
+                expected_output="Balanced summary of all stakeholder perspectives.",
+                agent=action_agent,
+            )
+        except Exception as e:
+            logger.error(f"Task setup failed: {e}")
+            errors.append(f"Task setup failed: {e}")
+            return {"success": False, "errors": errors}
+
+        # 4. Run workflow step by step, catching errors
+        try:
+            logger.info("Running policy discovery task...")
+            results['discovery'] = discovery_task.execute()
+        except Exception as e:
+            logger.error(f"Policy discovery failed: {e}")
+            errors.append(f"Policy discovery failed: {e}")
+        try:
+            logger.info("Running stakeholder identification task...")
+            results['stakeholder_id'] = stakeholder_id_task.execute()
+        except Exception as e:
+            logger.error(f"Stakeholder identification failed: {e}")
+            errors.append(f"Stakeholder identification failed: {e}")
+        for i, t in enumerate(stakeholder_research_tasks):
+            try:
+                logger.info(f"Running stakeholder research task {i}...")
+                results[f'stakeholder_research_{i}'] = t.execute()
+            except Exception as e:
+                logger.error(f"Stakeholder research {i} failed: {e}")
+                errors.append(f"Stakeholder research {i} failed: {e}")
+        try:
+            logger.info("Running topic analysis task...")
+            results['topic_analysis'] = topic_task.execute()
+        except Exception as e:
+            logger.error(f"Topic analysis failed: {e}")
+            errors.append(f"Topic analysis failed: {e}")
+        for i, t in enumerate(argument_tasks):
+            try:
+                logger.info(f"Running argument generation task {i}...")
+                results[f'argument_{i}'] = t.execute()
+            except Exception as e:
+                logger.error(f"Argument generation {i} failed: {e}")
+                errors.append(f"Argument generation {i} failed: {e}")
+        try:
+            logger.info("Running synthesis task...")
+            results['synthesis'] = synthesis_task.execute()
+        except Exception as e:
+            logger.error(f"Synthesis failed: {e}")
+            errors.append(f"Synthesis failed: {e}")
+
+        results['errors'] = errors
+        results['success'] = len(errors) == 0
+        return results
 
     def setup_dynamic_stakeholder_crew(self, stakeholder_list: List[Dict[str, Any]]) -> Crew:
         """Set up a dynamic crew with stakeholder-specific agents"""
@@ -267,9 +688,21 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
             self.stakeholder_tasks[stakeholder_name] = task
         
         # Combine all agents and tasks
-        all_agents = self.agents + stakeholder_agents
-        all_tasks = self.tasks + stakeholder_tasks
+        # Get agents and tasks from the CrewBase class
+        base_agents = [self.coordinator_agent(), self.policy_discovery_agent(), 
+                      self.policy_debate_agent(), self.advocate_sub_agents(), 
+                      self.action_agent(), self.debate_moderator_agent()]
+        base_tasks = [self.receive_query_task(), self.fetch_policy_text_task(),
+                     self.analyze_policy_text_task(), self.dynamic_sub_agent_creation_task(),
+                     self.stakeholder_analysis_task(), self.synthesize_summary_task(),
+                     self.draft_email_task(), self.analyze_debate_topics_task(),
+                     self.initiate_debate_session_task(), self.conduct_stakeholder_debate_task(),
+                     self.moderate_debate_flow_task(), self.summarize_debate_outcomes_task()]
         
+        all_agents = base_agents + stakeholder_agents
+        all_tasks = base_tasks + stakeholder_tasks
+        
+        # Create crew with minimal configuration to avoid circular references
         return Crew(
             agents=all_agents,
             tasks=all_tasks,

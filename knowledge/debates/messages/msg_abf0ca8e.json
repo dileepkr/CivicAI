@@ -1,0 +1,12 @@
+{
+  "message_id": "msg_abf0ca8e",
+  "sender": "Agent A",
+  "receiver": "Agent B",
+  "message_type": "request",
+  "content": "Test message",
+  "context": {
+    "key": "value"
+  },
+  "timestamp": "2025-07-13T02:46:38.313817",
+  "requires_response": true
+}

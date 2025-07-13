@@ -29,11 +29,19 @@ class HumanDebateSystem(BaseDebateSystem):
     def __init__(self):
         super().__init__("human_debate")
         
-        # Initialize Weave if available
-        if WEAVE_AVAILABLE:
+        # Check if Weave tracing is disabled via environment variable
+        import os
+        weave_tracing_disabled = os.getenv('WEAVE_DISABLE_TRACING', '0') == '1'
+        
+        # Initialize Weave if available and tracing is not disabled
+        if WEAVE_AVAILABLE and not weave_tracing_disabled:
             weave.init(project_name="civicai-human-debate")
             self.weave_enabled = True
         else:
+            # Disable Weave tracing to prevent circular reference issues
+            os.environ['WEAVE_DISABLE_TRACING'] = '1'
+            os.environ['WEAVE_AUTO_TRACE'] = '0'
+            os.environ['WEAVE_AUTO_PATCH'] = '0'
             self.weave_enabled = False
         
         # Enhanced session tracking
@@ -48,13 +56,13 @@ class HumanDebateSystem(BaseDebateSystem):
     
     def _weave_op(self, func):
         """Decorator wrapper for weave operations"""
-        if self.weave_enabled:
+        if hasattr(self, 'weave_enabled') and self.weave_enabled:
             return weave.op()(func)
         return func
     
     def _weave_attributes(self, attrs):
         """Context manager wrapper for weave attributes"""
-        if self.weave_enabled:
+        if hasattr(self, 'weave_enabled') and self.weave_enabled:
             return weave.attributes(attrs)
         else:
             # Return a dummy context manager

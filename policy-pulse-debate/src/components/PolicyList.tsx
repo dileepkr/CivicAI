@@ -1,99 +1,79 @@
 
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, Calendar, Users, Search, Loader2, AlertCircle } from 'lucide-react';
+import { Search, Loader2, AlertCircle, Sparkles, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { apiClient, Policy } from '@/services/api';
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { 
+  apiClient, 
+  Policy, 
+  DiscoveredPolicy,
+  PolicySearchRequest
+} from '@/services/api';
 import { useToast } from '@/hooks/use-toast';
 
 interface PolicyListProps {
-  onPolicySelect: (policy: Policy) => void;
-  selectedPolicy: Policy | null;
+  onPolicySelect: (policy: Policy | DiscoveredPolicy) => void;
+  selectedPolicy: Policy | DiscoveredPolicy | null;
 }
 
 const PolicyList: React.FC<PolicyListProps> = ({ onPolicySelect, selectedPolicy }) => {
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [searchText, setSearchText] = useState<string>('');
-  const [hasSearched, setHasSearched] = useState<boolean>(false);
-  const [policies, setPolicies] = useState<Policy[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [searchPrompt, setSearchPrompt] = useState<string>('');
+  const [discoveredPolicies, setDiscoveredPolicies] = useState<DiscoveredPolicy[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasSearched, setHasSearched] = useState<boolean>(false);
+  const [policyAnalysis, setPolicyAnalysis] = useState<any>(null);
   const { toast } = useToast();
 
-  // Load policies from backend on component mount
-  useEffect(() => {
-    loadPolicies();
-  }, []);
-
-  const loadPolicies = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const fetchedPolicies = await apiClient.getPolicies();
-      setPolicies(fetchedPolicies);
-      setHasSearched(true);
-      
+  const handlePromptSearch = async () => {
+    if (!searchPrompt.trim()) {
       toast({
-        title: "Policies loaded",
-        description: `Found ${fetchedPolicies.length} policies`,
-      });
-    } catch (err) {
-      console.error('Error loading policies:', err);
-      setError('Failed to load policies. Please ensure the backend is running.');
-      toast({
-        title: "Error loading policies",
-        description: "Failed to connect to the backend API",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
-      toast({
-        title: "File uploaded",
-        description: `${file.name} has been uploaded`,
-      });
-    }
-  };
-
-  const handleSearch = async () => {
-    if (!searchText.trim() && !uploadedFile) {
-      toast({
-        title: "Search required",
-        description: "Please enter search text or upload a file",
+        title: "Search prompt required",
+        description: "Please enter a policy question or topic to search for",
         variant: "destructive",
       });
       return;
     }
-    
-    setLoading(true);
+
     try {
-      // For now, just filter existing policies
-      // TODO: Implement actual search functionality when backend supports it
-      const filteredPolicies = policies.filter(policy => 
-        policy.title.toLowerCase().includes(searchText.toLowerCase()) ||
-        policy.summary.toLowerCase().includes(searchText.toLowerCase())
-      );
+      setLoading(true);
+      setError(null);
       
-      setPolicies(filteredPolicies);
-      setHasSearched(true);
+      // Use the new natural language search endpoint
+      const request: PolicySearchRequest = {
+        prompt: searchPrompt,
+        max_results: 20
+      };
       
-      toast({
-        title: "Search completed",
-        description: `Found ${filteredPolicies.length} matching policies`,
-      });
+      const response = await apiClient.searchPolicies(request);
+      
+      if (response.success) {
+        setDiscoveredPolicies(response.priority_policies);
+        setPolicyAnalysis(response.policy_analysis);
+        setHasSearched(true);
+        
+        toast({
+          title: "Policy search completed",
+          description: `Found ${response.total_found} relevant policies in ${response.search_time.toFixed(1)}s`,
+        });
+      } else {
+        setError(response.error || 'Policy search failed');
+        toast({
+          title: "Search failed",
+          description: response.error || "An error occurred during search",
+          variant: "destructive",
+        });
+      }
     } catch (err) {
       console.error('Error searching policies:', err);
+      setError('Failed to search policies');
       toast({
-        title: "Search error",
-        description: "Failed to search policies",
+        title: "Search failed",
+        description: "An error occurred while searching for policies",
         variant: "destructive",
       });
     } finally {
@@ -101,168 +81,220 @@ const PolicyList: React.FC<PolicyListProps> = ({ onPolicySelect, selectedPolicy 
     }
   };
 
-
-
-  const getRelevanceColor = (relevance: string) => {
-    switch (relevance) {
-      case 'high': return 'bg-red-100 text-red-800 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'low': return 'bg-green-100 text-green-800 border-green-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handlePromptSearch();
     }
   };
 
-  return (
-    <div className="h-full flex flex-col">
-      <div className="p-4 border-b bg-blue-50">
-        <h2 className="text-xl font-bold text-gray-800 mb-2">SF Policies</h2>
-        <p className="text-sm text-gray-600">Latest policies affecting San Francisco residents</p>
-      </div>
+  const getRelevanceColor = (relevance: string) => {
+    switch (relevance) {
+      case 'high': return 'bg-red-100 text-red-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800';
+      case 'low': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
-      {/* Upload Section */}
-      <div className="p-4 border-b bg-white">
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'high': return 'bg-red-100 text-red-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800';
+      case 'low': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getGovernmentLevelColor = (level: string) => {
+    switch (level) {
+      case 'federal': return 'bg-blue-100 text-blue-800';
+      case 'state': return 'bg-purple-100 text-purple-800';
+      case 'local': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString();
+  };
+
+  if (loading && !hasSearched) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Loading policy discovery...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5" />
+            AI Policy Discovery
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                What policy topic would you like to explore?
+              </label>
+              <div className="relative">
+                <Textarea
+                  placeholder="Ask about any policy topic... 
+
+Examples:
+• 'What are the rent control policies in San Francisco?'
+• 'Show me housing policies for renters in California'
+• 'What labor rights policies affect small business owners?'
+• 'Tell me about environmental regulations in my area'"
+                  value={searchPrompt}
+                  onChange={(e) => setSearchPrompt(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  className="min-h-[120px] pr-12 resize-none"
+                  disabled={loading}
+                />
+                <Button 
+                  onClick={handlePromptSearch}
+                  disabled={loading || !searchPrompt.trim()}
+                  className="absolute bottom-2 right-2 h-8 w-8 p-0"
+                  size="sm"
+                >
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <Sparkles className="h-4 w-4" />
+              <span>
+                Our AI will analyze your query and find relevant policies across federal, state, and local levels
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {policyAnalysis && (
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Upload className="w-4 h-4" />
-              Upload Agreement
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5" />
+              AI Policy Analysis
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
-                <div className="flex flex-col items-center justify-center pt-2 pb-3">
-                  <FileText className="w-6 h-6 mb-1 text-gray-500" />
-                  <p className="text-xs text-gray-500">Click to upload PDF</p>
-                </div>
-                <input type="file" className="hidden" accept=".pdf" onChange={handleFileUpload} />
-              </label>
-              {uploadedFile ? (
-                <div className="flex items-center gap-2 text-sm text-green-600">
-                  <FileText className="w-4 h-4" />
-                  <span className="truncate">{uploadedFile.name}</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <FileText className="w-3 h-3" />
-                  <span className="italic">Example: rental_agreement_July2025_SF.pdf</span>
-                </div>
-              )}
-            </div>
+            <p className="text-sm text-gray-700 mb-4">
+              {policyAnalysis.answer}
+            </p>
+            {policyAnalysis.citations && (
+              <div className="space-y-2">
+                <h4 className="font-medium">Sources:</h4>
+                <ul className="text-sm space-y-1">
+                  {policyAnalysis.citations.map((citation: any, index: number) => (
+                    <li key={index}>
+                      <a href={citation.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                        {citation.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </CardContent>
         </Card>
-      </div>
-
-      {/* Search Section */}
-      <div className="p-4 border-b bg-white">
-        <div className="flex gap-2">
-          <Input
-            placeholder="Enter area of interest (e.g., housing, transportation, environment)"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            className="flex-1"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                handleSearch();
-              }
-            }}
-          />
-          <Button 
-            onClick={handleSearch} 
-            className="flex items-center gap-2"
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Search className="w-4 h-4" />
-            )}
-            Search
-          </Button>
-        </div>
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <div className="p-4">
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              {error}
-            </AlertDescription>
-          </Alert>
-        </div>
       )}
 
-      {/* Policies List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center h-full">
-            <Loader2 className="w-8 h-8 animate-spin text-blue-500 mb-4" />
-            <p className="text-sm text-gray-600">Loading policies...</p>
+      <div className="space-y-4">
+        {hasSearched && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold">Discovered Policies ({discoveredPolicies.length})</h3>
+              {discoveredPolicies.length > 0 && (
+                <Badge variant="outline">
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  AI-Powered Results
+                </Badge>
+              )}
+            </div>
+            
+            {discoveredPolicies.map((policy) => (
+              <Card 
+                key={policy.id}
+                className={`cursor-pointer transition-all ${
+                  selectedPolicy?.id === policy.id ? 'ring-2 ring-blue-500' : 'hover:shadow-md'
+                }`}
+                onClick={() => onPolicySelect(policy)}
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-start">
+                    <CardTitle className="text-lg">{policy.title}</CardTitle>
+                    <div className="flex gap-2">
+                      <Badge className={getGovernmentLevelColor(policy.government_level)}>
+                        {policy.government_level}
+                      </Badge>
+                      <Badge variant="outline">{policy.domain}</Badge>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600 mb-4">{policy.summary}</p>
+                  
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <span className="text-xs text-gray-500">
+                      {formatDate(policy.last_updated)}
+                    </span>
+                    <span className="text-xs text-gray-500">{policy.source_agency}</span>
+                    <span className="text-xs text-gray-500">
+                      Confidence: {(policy.confidence_score * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  
+                  {policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium">Stakeholder Impacts:</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {policy.stakeholder_impacts.map((impact, index) => (
+                          <Badge key={index} className={getSeverityColor(impact.severity)}>
+                            {impact.group} - {impact.severity}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
           </div>
-        ) : !hasSearched ? (
-          // Show message before search
-          <div className="flex flex-col items-center justify-center h-full text-center py-8">
-            <Search className="w-12 h-12 text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-600 mb-2">Search for Policies</h3>
-            <p className="text-sm text-gray-500 max-w-sm">
-              Enter your area of interest or upload an agreement to find relevant upcoming policies
-            </p>
-          </div>
-        ) : policies.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center py-8">
-            <FileText className="w-12 h-12 text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-600 mb-2">No Policies Found</h3>
-            <p className="text-sm text-gray-500 max-w-sm">
-              No policies match your search criteria. Try different keywords or check the backend connection.
-            </p>
-          </div>
-        ) : selectedPolicy ? (
-          // Show only selected policy
-          <Card 
-            className="ring-2 ring-blue-500 bg-blue-50 cursor-pointer"
-            onClick={() => onPolicySelect(selectedPolicy)}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between mb-2">
-                <h3 className="font-semibold text-sm text-gray-800 leading-tight">{selectedPolicy.title}</h3>
-                <span className={`px-2 py-1 rounded-full text-xs border ${getRelevanceColor(selectedPolicy.relevance)}`}>
-                  {selectedPolicy.relevance}
-                </span>
-              </div>
-              <p className="text-xs text-gray-600 mb-2">{selectedPolicy.summary}</p>
-              <div className="flex items-center gap-1 text-xs text-gray-500">
-                <Calendar className="w-3 h-3" />
-                <span>{new Date(selectedPolicy.date).toLocaleDateString()}</span>
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          // Show all policies
-          policies.map((policy) => (
-            <Card 
-              key={policy.id}
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => onPolicySelect(policy)}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-semibold text-sm text-gray-800 leading-tight">{policy.title}</h3>
-                  <span className={`px-2 py-1 rounded-full text-xs border ${getRelevanceColor(policy.relevance)}`}>
-                    {policy.relevance}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-600 mb-2">{policy.summary}</p>
-                <div className="flex items-center gap-1 text-xs text-gray-500">
-                  <Calendar className="w-3 h-3" />
-                  <span>{new Date(policy.date).toLocaleDateString()}</span>
-                </div>
-              </CardContent>
-            </Card>
-          ))
         )}
       </div>
+
+      {!hasSearched && !loading && (
+        <div className="text-center py-12">
+          <Sparkles className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">
+            Ready to discover policies
+          </h3>
+          <p className="text-gray-600">
+            Enter your policy question above and let our AI find relevant policies across all government levels.
+          </p>
+        </div>
+      )}
     </div>
   );
 };

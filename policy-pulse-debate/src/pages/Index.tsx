@@ -1,70 +1,75 @@
 
-import React, { useState } from 'react';
-import PolicyList from '@/components/PolicyList';
-import DebatePanel from '@/components/DebatePanel';
-import EmailGenerator from '@/components/EmailGenerator';
-import { Policy } from '@/services/api';
+import React from 'react';
+import ChatInterface from '@/components/ChatInterface';
+import { Building, Users, MessageCircle, Mail, Globe } from 'lucide-react';
 
 const Index = () => {
-  const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
-  const [showEmailGenerator, setShowEmailGenerator] = useState(false);
-  const [debateMessages, setDebateMessages] = useState<any[]>([]);
-
-  const handlePolicySelect = (policy: Policy) => {
-    setSelectedPolicy(policy);
-    setShowEmailGenerator(false);
-    setDebateMessages([]); // Clear messages when policy changes
-  };
-
-  const handleGenerateEmail = () => {
-    setShowEmailGenerator(true);
-  };
-
-  const handleMessagesChange = (messages: any[]) => {
-    setDebateMessages(messages);
-  };
-
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="px-6 py-4">
-          <h1 className="text-2xl font-bold text-gray-900">
-            SF Policy Discussion Platform
-          </h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Engage with AI agents to understand and advocate for policies in San Francisco. Enter your area of interest or upload agreements to search for relevant upcoming policies.
-          </p>
+    <div className="min-h-screen bg-gray-50">
+      {/* Minimalistic Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200">
+        <div className="px-4 sm:px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
+                <Building className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold text-gray-900">
+                  SF Policy Discussion Platform
+                </h1>
+                <p className="text-sm text-gray-600">
+                  AI-Powered Policy Discovery & Civic Engagement
+                </p>
+              </div>
+            </div>
+            
+            {/* Simple feature indicators */}
+            <div className="hidden md:flex items-center gap-4 text-xs text-gray-500">
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                <span>AI-Powered</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span>Real-time Debates</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                <span>Advocacy Tools</span>
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <div className="flex h-[calc(100vh-88px)]">
-        {/* Left Panel - Policy List */}
-        <div className="w-1/3 bg-white border-r shadow-sm">
-          <PolicyList 
-            onPolicySelect={handlePolicySelect}
-            selectedPolicy={selectedPolicy}
-          />
-        </div>
-
-        {/* Center Panel - Debate */}
-        <div className="w-1/3 bg-white border-r shadow-sm">
-          <DebatePanel 
-            selectedPolicy={selectedPolicy}
-            onGenerateEmail={handleGenerateEmail}
-            onMessagesChange={handleMessagesChange}
-          />
-        </div>
-
-        {/* Right Panel - Email Generator */}
-        <div className="w-1/3 bg-white shadow-sm">
-          <EmailGenerator 
-            selectedPolicy={selectedPolicy}
-            debateMessages={debateMessages}
-          />
+      {/* Main Chat Interface */}
+      <div className="h-[calc(100vh-140px)] max-w-7xl mx-auto px-4 sm:px-6 py-4">
+        <div className="h-full bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <ChatInterface />
         </div>
       </div>
+
+      {/* Simple Footer */}
+      <footer className="bg-white border-t border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1">
+                <Globe className="w-3 h-3" />
+                <span>San Francisco Focused</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Users className="w-3 h-3" />
+                <span>Multi-Stakeholder</span>
+              </div>
+            </div>
+            <div>
+              Powered by AI • Built for Civic Engagement
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };

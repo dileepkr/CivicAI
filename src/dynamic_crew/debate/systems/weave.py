@@ -27,23 +27,34 @@ class WeaveDebateSystem(BaseDebateSystem):
     def __init__(self):
         super().__init__("weave_debate")
         
-        if WEAVE_AVAILABLE:
-            # Initialize Weave with project name
+        # Check if Weave tracing is disabled via environment variable
+        import os
+        weave_tracing_disabled = os.getenv('WEAVE_DISABLE_TRACING', '0') == '1'
+        
+        if WEAVE_AVAILABLE and not weave_tracing_disabled:
+            # Only initialize Weave if tracing is not disabled
             weave.init(project_name="civicai-hackathon")
-            print(f"🔗 Weave Tracing Active - Session: {self.session_id}")
+            self.weave_enabled = True
+            print(f"🔗 Weave System Active - Session: {self.session_id}")
             print(f"📊 View traces at: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-hackathon")
         else:
-            print("⚠️  Weave tracing disabled - functionality will work without tracing")
+            # Disable Weave tracing to prevent circular reference issues
+            os.environ['WEAVE_DISABLE_TRACING'] = '1'
+            os.environ['WEAVE_AUTO_TRACE'] = '0'
+            os.environ['WEAVE_AUTO_PATCH'] = '0'
+            self.weave_enabled = False
+            print(f"🔗 Weave System Active (Tracing Disabled) - Session: {self.session_id}")
+            print("⚠️  Weave tracing disabled to prevent circular reference issues")
     
     def _weave_op(self, func):
         """Decorator wrapper for weave operations"""
-        if WEAVE_AVAILABLE:
+        if WEAVE_AVAILABLE and hasattr(self, 'weave_enabled') and self.weave_enabled:
             return weave.op()(func)
         return func
     
     def _weave_attributes(self, attrs):
         """Context manager wrapper for weave attributes"""
-        if WEAVE_AVAILABLE:
+        if WEAVE_AVAILABLE and hasattr(self, 'weave_enabled') and self.weave_enabled:
             return weave.attributes(attrs)
         else:
             # Return a dummy context manager

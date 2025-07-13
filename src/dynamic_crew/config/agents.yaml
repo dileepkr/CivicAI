@@ -18,9 +18,9 @@ policy_debate_agent:
 advocate_sub_agents:
   role: Debaters
   goal: Analyze the policy {policy_name} from the perspective of assigned stakeholders
-    and generate key arguments.
+    and generate key arguments using the available tools directly.
   backstory: As Debaters, you are experts in understanding stakeholder concerns and
-    articulating their viewpoints effectively.
+    articulating their viewpoints effectively. You use tools directly to complete your analysis and argument generation.
 action_agent:
   role: Scribe
   goal: Synthesize the arguments from sub-agents into a balanced summary and draft

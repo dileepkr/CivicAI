@@ -358,8 +358,8 @@ class KnowledgeBaseManagerInput(BaseModel):
 
 class StakeholderResearcherInput(BaseModel):
     """Input schema for StakeholderResearcher."""
-    stakeholder_info: str = Field(..., description="JSON string containing stakeholder information or stakeholder object")
-    policy_text: str = Field(..., description="The policy text to analyze or policy object")
+    stakeholder_info: str = Field(..., description="JSON string containing stakeholder information")
+    policy_text: str = Field(..., description="The policy text to analyze")
 
 # =============================================================================
 # INPUT MODELS FOR DEBATE TOOLS
@@ -367,19 +367,19 @@ class StakeholderResearcherInput(BaseModel):
 
 class TopicAnalyzerInput(BaseModel):
     """Input schema for TopicAnalyzer."""
-    policy_text: str = Field(..., description="The policy text to analyze for debate topics or policy object")
-    stakeholder_list: str = Field(..., description="JSON string of stakeholder information or stakeholder object")
+    policy_text: str = Field(..., description="The policy text to analyze for debate topics")
+    stakeholder_list: str = Field(..., description="JSON string of stakeholder information")
 
 class DebateModeratorInput(BaseModel):
     """Input schema for DebateModerator."""
     session_id: str = Field(..., description="ID of the debate session")
     action: str = Field(..., description="Action: start, moderate, summarize, end")
-    context: str = Field(default="", description="Additional context for the action or context object")
+    context: str = Field(default="", description="Additional context for the action")
 
 class ArgumentGeneratorInput(BaseModel):
     """Input schema for ArgumentGenerator."""
     stakeholder_name: str = Field(..., description="Name of the stakeholder")
-    topic: str = Field(..., description="JSON string of the debate topic or topic object")
+    topic: str = Field(..., description="JSON string of the debate topic")
     argument_type: str = Field(..., description="Type of argument to generate")
     responding_to: str = Field(default="", description="ID of argument being responded to")
 
@@ -389,7 +389,7 @@ class A2AMessengerInput(BaseModel):
     receiver: str = Field(..., description="Name of the receiving agent")
     message_type: str = Field(..., description="Type of message")
     content: str = Field(..., description="Message content")
-    context: str = Field(default="{}", description="JSON string of additional context or context object")
+    context: str = Field(default="{}", description="JSON string of additional context")
 
 # =============================================================================
 # ENHANCED TOOLS WITH PYDANTIC OUTPUT VALIDATION
@@ -562,29 +562,13 @@ class StakeholderResearcher(BaseTool):
             if not weave_client.is_available():
                 return "Error: Weave client not available - WNB_API_KEY required"
             
-            # Handle both string and dictionary inputs from CrewAI
-            if isinstance(stakeholder_info, dict):
-                stakeholder_data = stakeholder_info
-            else:
-                try:
-                    stakeholder_data = json.loads(stakeholder_info)
-                except (json.JSONDecodeError, TypeError):
-                    # If it's not valid JSON, treat it as a simple string
-                    stakeholder_data = {"name": str(stakeholder_info), "type": "unknown"}
-            
-            # Handle both string and dictionary inputs for policy_text
-            if isinstance(policy_text, dict):
-                # Extract text from policy object
-                policy_text_str = policy_text.get("text", "") or policy_text.get("content", "") or str(policy_text)
-            else:
-                policy_text_str = str(policy_text)
-            
+            stakeholder_data = json.loads(stakeholder_info)
             stakeholder_name = stakeholder_data.get("name", "Unknown Stakeholder")
             stakeholder_type = stakeholder_data.get("type", "unknown")
             
             # Use the specialized policy analysis method
             result = weave_client.analyze_policy(
-                policy_text=policy_text_str,
+                policy_text=policy_text,
                 analysis_type="stakeholder_research",
                 context={"stakeholder_name": stakeholder_name}
             )
@@ -622,9 +606,7 @@ class StakeholderResearcher(BaseTool):
                 return f"Error: Response validation failed: {str(e)}"
             
         except Exception as e:
-            error_msg = f"Error conducting stakeholder research: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            return f"Error conducting stakeholder research: {str(e)}"
 
 # =============================================================================
 # DEBATE TOOLS - Tools for structured debate system with A2A protocols
@@ -639,63 +621,63 @@ class TopicAnalyzer(BaseTool):
 
     def _run(self, policy_text: str, stakeholder_list: str) -> str:
         try:
-            # Get Weave client
-            weave_client = get_weave_client()
-            if not weave_client.is_available():
-                return "Error: Weave client not available - WNB_API_KEY required"
+            # Configure Gemini API
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                return "Error: GEMINI_API_KEY not found in environment variables"
             
-            # Handle both string and dictionary inputs from CrewAI
-            if isinstance(policy_text, dict):
-                # Extract text from policy object
-                policy_text_str = policy_text.get("text", "") or policy_text.get("content", "") or str(policy_text)
-            else:
-                policy_text_str = str(policy_text)
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
             
-            # Handle both string and dictionary inputs for stakeholder_list
-            if isinstance(stakeholder_list, dict):
-                stakeholders = stakeholder_list
-            else:
-                try:
-                    stakeholders = json.loads(stakeholder_list)
-                except (json.JSONDecodeError, TypeError):
-                    # If it's not valid JSON, create a simple structure
-                    stakeholders = {"stakeholders": [{"name": str(stakeholder_list), "type": "unknown"}]}
-            
+            # Parse stakeholder list
+            stakeholders = json.loads(stakeholder_list)
             stakeholder_names = [s.get('name', 'Unknown') for s in stakeholders.get('stakeholders', [])]
             
-            # Use the specialized policy analysis method
-            result = weave_client.analyze_policy(
-                policy_text=policy_text_str,
-                analysis_type="topic_analysis",
-                context={"stakeholder_list": stakeholders}
-            )
+            prompt = f"""
+            You are a policy debate moderator. Analyze the following policy text and stakeholder information to identify key debate topics.
             
-            # Check if there was an error
-            if "error" in result:
-                return f"Error in topic analysis: {result['error']}"
+            Policy Text:
+            {policy_text}
+            
+            Stakeholder Information:
+            {stakeholder_list}
+            
+            Identify debate topics that are likely to generate disagreement or require discussion between stakeholders.
+            For each topic, consider:
+            1. What stakeholders would be most involved
+            2. What are the key questions or points of contention
+            3. How important/contentious is this topic (priority 1-10)
+            
+            Return ONLY a valid JSON object with this structure:
+            {{
+                "topics": [
+                    {{
+                        "topic_id": "unique_topic_id",
+                        "title": "Topic Title",
+                        "description": "Detailed description of what this topic covers",
+                        "priority": 8,
+                        "stakeholders_involved": ["Stakeholder1", "Stakeholder2"],
+                        "key_questions": ["Question 1?", "Question 2?"]
+                    }}
+                ],
+                "total_count": 3,
+                "analysis_summary": "Summary of the debate topics identified"
+            }}
+            """
+            
+            response = model.generate_content(prompt)
+            raw_response = response.text.strip()
+            
+            # Clean up the response
+            if raw_response.startswith("```json"):
+                raw_response = raw_response[7:]
+            if raw_response.endswith("```"):
+                raw_response = raw_response[:-3]
+            raw_response = raw_response.strip()
             
             # Parse and validate
             try:
-                debate_topics = result.get("debate_topics", [])
-                
-                # Map to expected format
-                formatted_topics = []
-                for i, topic in enumerate(debate_topics):
-                    formatted_topic = {
-                        "topic_id": f"topic_{i+1}",
-                        "title": topic.get("topic", f"Topic {i+1}"),
-                        "description": topic.get("description", ""),
-                        "priority": 5,  # Default priority
-                        "stakeholders_involved": list(topic.get("stakeholder_positions", {}).keys()),
-                        "key_questions": topic.get("key_questions", [])
-                    }
-                    formatted_topics.append(formatted_topic)
-                
-                topic_data = {
-                    "topics": formatted_topics,
-                    "total_count": len(formatted_topics),
-                    "analysis_summary": f"Identified {len(formatted_topics)} key debate topics"
-                }
+                topic_data = json.loads(raw_response)
                 
                 # Validate each topic
                 validated_topics = []
@@ -718,9 +700,7 @@ class TopicAnalyzer(BaseTool):
                 return f"Error: Invalid topic data format - {str(e)}"
             
         except Exception as e:
-            error_msg = f"Error analyzing debate topics: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            return f"Error analyzing debate topics: {str(e)}"
 
 class ArgumentGenerator(BaseTool):
     name: str = "ArgumentGenerator"
@@ -731,20 +711,16 @@ class ArgumentGenerator(BaseTool):
 
     def _run(self, stakeholder_name: str, topic: str, argument_type: str, responding_to: str = "") -> str:
         try:
-            # Get Weave client
-            weave_client = get_weave_client()
-            if not weave_client.is_available():
-                return "Error: Weave client not available - WNB_API_KEY required"
+            # Configure Gemini API
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                return "Error: GEMINI_API_KEY not found in environment variables"
             
-            # Handle both string and dictionary inputs for topic
-            if isinstance(topic, dict):
-                topic_data = topic
-            else:
-                try:
-                    topic_data = json.loads(topic)
-                except (json.JSONDecodeError, TypeError):
-                    # If it's not valid JSON, create a simple structure
-                    topic_data = {"title": str(topic), "description": str(topic)}
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            # Parse topic information
+            topic_data = json.loads(topic)
             
             # Retrieve stakeholder's knowledge base
             kb_manager = KnowledgeBaseManager()
@@ -760,47 +736,67 @@ class ArgumentGenerator(BaseTool):
             else:  # claim, evidence
                 prompt_instruction = f"Make a {argument_type} argument about this topic"
             
-            # Use the specialized policy analysis method
-            result = weave_client.analyze_policy(
-                policy_text=kb_data,  # Use knowledge base as policy context
-                analysis_type="argument_generation",
-                context={
-                    "stakeholder_name": stakeholder_name,
-                    "topic": topic,
-                    "argument_type": argument_type
-                }
-            )
+            prompt = f"""
+            You are representing {stakeholder_name} in a policy debate. {prompt_instruction}.
             
-            # Check if there was an error
-            if "error" in result:
-                return f"Error in argument generation: {result['error']}"
+            Topic Information:
+            {topic}
+            
+            Your Knowledge Base:
+            {kb_data}
+            
+            Argument Type: {argument_type}
+            {"Responding to argument ID: " + responding_to if responding_to else ""}
+            
+            Create a structured argument following these guidelines:
+            1. Be factual and evidence-based
+            2. Stay true to your stakeholder's interests and concerns
+            3. Be respectful but firm in your position
+            4. Provide specific evidence when possible
+            
+            Return ONLY a valid JSON object with this structure:
+            {{
+                "argument_id": "unique_argument_id",
+                "stakeholder_name": "{stakeholder_name}",
+                "argument_type": "{argument_type}",
+                "content": "The main argument content",
+                "evidence": ["Evidence 1", "Evidence 2"],
+                "references_argument_id": "{responding_to if responding_to else ""}",
+                "strength": 7,
+                "timestamp": "2024-01-01T10:00:00"
+            }}
+            """
+            
+            response = model.generate_content(prompt)
+            raw_response = response.text.strip()
+            
+            # Clean up the response
+            if raw_response.startswith("```json"):
+                raw_response = raw_response[7:]
+            if raw_response.endswith("```"):
+                raw_response = raw_response[:-3]
+            raw_response = raw_response.strip()
             
             # Parse and validate
             try:
-                # Map the Weave response to the expected format
-                argument_data = {
-                    "argument_id": f"arg_{int(datetime.now().timestamp())}",
-                    "stakeholder_name": result.get("stakeholder", stakeholder_name),
-                    "argument_type": result.get("argument_type", argument_type),
-                    "content": result.get("argument", ""),
-                    "evidence": result.get("evidence", []),
-                    "references_argument_id": responding_to if responding_to else None,
-                    "strength": 7,  # Default strength
-                    "timestamp": pd.Timestamp.now().isoformat()
-                }
+                argument_data = json.loads(raw_response)
+                
+                # Ensure proper timestamp
+                if 'timestamp' not in argument_data:
+                    argument_data['timestamp'] = pd.Timestamp.now().isoformat()
                 
                 # Validate argument
                 validated_argument = Argument(**argument_data)
                 
                 return validated_argument.model_dump_json(indent=2)
                 
+            except json.JSONDecodeError:
+                return f"Error: Invalid JSON response from AI model. Raw response: {raw_response}"
             except ValidationError as e:
-                return f"Error: Response validation failed: {str(e)}"
+                return f"Error: Invalid argument data format - {str(e)}"
             
         except Exception as e:
-            error_msg = f"Error generating argument: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            return f"Error generating argument: {str(e)}"
 
 class A2AMessenger(BaseTool):
     name: str = "A2AMessenger"
@@ -811,14 +807,8 @@ class A2AMessenger(BaseTool):
 
     def _run(self, sender: str, receiver: str, message_type: str, content: str, context: str = "{}") -> str:
         try:
-            # Handle both string and dictionary inputs for context
-            if isinstance(context, dict):
-                message_context = context
-            else:
-                try:
-                    message_context = json.loads(context) if context else {}
-                except (json.JSONDecodeError, TypeError):
-                    message_context = {}
+            # Parse context
+            message_context = json.loads(context) if context else {}
             
             # Generate unique message ID
             import uuid
@@ -867,13 +857,7 @@ class DebateModerator(BaseTool):
             
             if action == "start":
                 # Initialize new debate session
-                if isinstance(context, dict):
-                    context_data = context
-                else:
-                    try:
-                        context_data = json.loads(context) if context else {}
-                    except (json.JSONDecodeError, TypeError):
-                        context_data = {}
+                context_data = json.loads(context) if context else {}
                 
                 session = DebateSession(
                     session_id=session_id,
@@ -898,23 +882,34 @@ class DebateModerator(BaseTool):
                 with open(session_file, 'r') as f:
                     session_data = json.load(f)
                 
-                # Use Weave client for moderation
-                weave_client = get_weave_client()
-                if not weave_client.is_available():
-                    return "Error: Weave client not available - WNB_API_KEY required"
+                # Configure Gemini API for moderation
+                api_key = os.getenv('GEMINI_API_KEY')
+                if not api_key:
+                    return "Error: GEMINI_API_KEY not found in environment variables"
                 
-                # Use the specialized policy analysis method
-                result = weave_client.analyze_policy(
-                    policy_text="",  # No specific policy text needed for moderation
-                    analysis_type="debate_moderation",
-                    context={"session_context": session_data}
-                )
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 
-                # Check if there was an error
-                if "error" in result:
-                    return f"Error in debate moderation: {result['error']}"
+                prompt = f"""
+                You are moderating a policy debate. Based on the current session state and context, provide moderation guidance.
                 
-                return result.get("moderation_message", "Continue with the debate.")
+                Session State:
+                {json.dumps(session_data, indent=2)}
+                
+                Context:
+                {context}
+                
+                Provide moderation guidance including:
+                1. Next steps in the debate
+                2. Which stakeholder should speak next
+                3. Any procedural notes
+                4. Topic transitions if needed
+                
+                Return your moderation guidance as a clear, actionable message.
+                """
+                
+                response = model.generate_content(prompt)
+                return response.text
             
             elif action == "summarize":
                 # Generate debate summary
