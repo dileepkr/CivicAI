@@ -53,7 +53,7 @@ async def main():
         print(f"Answer: {analysis['answer']}")
         if analysis['citations']:
             print(f"\nBased on {len(analysis['citations'])} sources:")
-            for i, citation in enumerate(analysis['citations'][:2], 1):  # Show top 2 citations
+            for i, citation in enumerate(analysis['citations'][:], 1):  # Show top 2 citations
                 print(f"  {i}. {citation['title']} - {citation['url']}")
 
     # Display top 3 policies in the new format

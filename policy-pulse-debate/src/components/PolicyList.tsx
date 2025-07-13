@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, Loader2, AlertCircle, Sparkles, Send } from 'lucide-react';
+import { Search, Loader2, AlertCircle, Sparkles, Send, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   apiClient, 
   Policy, 
@@ -22,6 +23,7 @@ interface PolicyListProps {
 
 const PolicyList: React.FC<PolicyListProps> = ({ onPolicySelect, selectedPolicy }) => {
   const [searchPrompt, setSearchPrompt] = useState<string>('');
+  const [contentFilter, setContentFilter] = useState<'policies' | 'news' | 'both'>('both');
   const [discoveredPolicies, setDiscoveredPolicies] = useState<DiscoveredPolicy[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +48,8 @@ const PolicyList: React.FC<PolicyListProps> = ({ onPolicySelect, selectedPolicy 
       // Use the new natural language search endpoint
       const request: PolicySearchRequest = {
         prompt: searchPrompt,
-        max_results: 20
+        max_results: 20,
+        content_filter: contentFilter
       };
       
       const response = await apiClient.searchPolicies(request);
@@ -115,6 +118,24 @@ const PolicyList: React.FC<PolicyListProps> = ({ onPolicySelect, selectedPolicy 
     }
   };
 
+  const getContentTypeColor = (contentType: string) => {
+    switch (contentType) {
+      case 'policy': return 'bg-emerald-100 text-emerald-800';
+      case 'news': return 'bg-orange-100 text-orange-800';
+      case 'mixed': return 'bg-indigo-100 text-indigo-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getContentTypeIcon = (contentType: string) => {
+    switch (contentType) {
+      case 'policy': return '📋';
+      case 'news': return '📰';
+      case 'mixed': return '📊';
+      default: return '📄';
+    }
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString();
   };
@@ -139,44 +160,78 @@ const PolicyList: React.FC<PolicyListProps> = ({ onPolicySelect, selectedPolicy 
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                What policy topic would you like to explore?
-              </label>
-              <div className="relative">
-                <Textarea
-                  placeholder="Ask about any policy topic... 
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium">
+                  What policy topic would you like to explore?
+                </label>
+                <div className="relative mt-2">
+                  <Textarea
+                    placeholder="Ask about any policy topic... 
 
 Examples:
 • 'What are the rent control policies in San Francisco?'
 • 'Show me housing policies for renters in California'
 • 'What labor rights policies affect small business owners?'
 • 'Tell me about environmental regulations in my area'"
-                  value={searchPrompt}
-                  onChange={(e) => setSearchPrompt(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  className="min-h-[120px] pr-12 resize-none"
-                  disabled={loading}
-                />
-                <Button 
-                  onClick={handlePromptSearch}
-                  disabled={loading || !searchPrompt.trim()}
-                  className="absolute bottom-2 right-2 h-8 w-8 p-0"
-                  size="sm"
-                >
-                  {loading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
+                    value={searchPrompt}
+                    onChange={(e) => setSearchPrompt(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    className="min-h-[120px] pr-12 resize-none"
+                    disabled={loading}
+                  />
+                  <Button 
+                    onClick={handlePromptSearch}
+                    disabled={loading || !searchPrompt.trim()}
+                    className="absolute bottom-2 right-2 h-8 w-8 p-0"
+                    size="sm"
+                  >
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-gray-500" />
+                  <label className="text-sm font-medium">Content Type:</label>
+                </div>
+                <Select value={contentFilter} onValueChange={(value) => setContentFilter(value as any)}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="both">
+                      <div className="flex items-center gap-2">
+                        <span>📄</span>
+                        <span>All Content</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="policies">
+                      <div className="flex items-center gap-2">
+                        <span>📋</span>
+                        <span>Policies Only</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="news">
+                      <div className="flex items-center gap-2">
+                        <span>📰</span>
+                        <span>News Only</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <Sparkles className="h-4 w-4" />
               <span>
-                Our AI will analyze your query and find relevant policies across federal, state, and local levels
+                Our AI will analyze your query and find relevant content across federal, state, and local levels. Use the filter to focus on policies, news, or both.
               </span>
             </div>
           </div>
@@ -244,11 +299,17 @@ Examples:
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start">
                     <CardTitle className="text-lg">{policy.title}</CardTitle>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       <Badge className={getGovernmentLevelColor(policy.government_level)}>
                         {policy.government_level}
                       </Badge>
                       <Badge variant="outline">{policy.domain}</Badge>
+                      {policy.content_type && (
+                        <Badge className={getContentTypeColor(policy.content_type)}>
+                          <span className="mr-1">{getContentTypeIcon(policy.content_type)}</span>
+                          {policy.content_type}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                 </CardHeader>

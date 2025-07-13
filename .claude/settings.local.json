@@ -10,7 +10,16 @@
       "Bash(python:*)",
       "mcp__ide__getDiagnostics",
       "WebFetch(domain:calmatters.digitaldemocracy.org)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(mkdir:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:medium.com)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(grep:*)",
+      "Bash(npm run build:*)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }
