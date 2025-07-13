@@ -1,7 +1,7 @@
 {
   "stakeholder_name": "Demo Stakeholder",
   "research_data": "{\"name\": \"Demo Stakeholder\", \"research\": \"Updated research data with new findings from Serper search.\", \"insights\": [\"Updated insight 1\", \"New insight 2\", \"Additional insight 3\"], \"serper_research\": \"Comprehensive web research using Serper's search capabilities\"}",
-  "timestamp": "2025-07-12T16:23:53.271098",
+  "timestamp": "2025-07-12T18:45:21.859584",
   "version": 2,
   "previous_research": "{\"name\": \"Demo Stakeholder\", \"research\": \"This is sample research data for demonstration purposes.\", \"insights\": [\"Key insight 1\", \"Key insight 2\", \"Key insight 3\"], \"search_results\": \"Enhanced with Serper search capabilities for comprehensive research\"}"
 }

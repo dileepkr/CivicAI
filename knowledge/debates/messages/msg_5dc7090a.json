@@ -1,0 +1,13 @@
+{
+  "message_id": "msg_5dc7090a",
+  "sender": "Property Owners Agent",
+  "receiver": "City Officials Agent",
+  "message_type": "argument",
+  "content": "We need more time for implementation due to financial constraints",
+  "context": {
+    "topic_id": "implementation_timeline",
+    "argument_type": "claim"
+  },
+  "timestamp": "2025-07-12T18:45:46.004603",
+  "requires_response": true
+}

@@ -4,16 +4,27 @@ import os
 from dotenv import load_dotenv
 from dynamic_crew.crew import DynamicCrewAutomationForPolicyAnalysisAndDebateCrew
 import weave
+import logging
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging to avoid weave serialization issues
+logging.getLogger("crewai").setLevel(logging.WARNING)
+logging.getLogger("langchain").setLevel(logging.WARNING)
 
 # This main file is intended to be a way for your to run your
 # crew locally, so refrain from adding unnecessary logic into this file.
 # Replace with inputs you want to test with, it will automatically
 # interpolate any tasks and agents information
 
-weave.init(project_name="civicAI")
+# Initialize weave with error handling
+try:
+    weave.init(project_name="civicAI")
+    print("✅ Weave initialized successfully")
+except Exception as e:
+    print(f"⚠️ Weave initialization warning: {e}")
+    # Continue without weave if needed
 
 def run():
     """
@@ -51,8 +62,27 @@ def run():
         return
     
     try:
+        print("🔧 Creating crew instance...")
         crew_instance = DynamicCrewAutomationForPolicyAnalysisAndDebateCrew()
-        result = crew_instance.crew().kickoff(inputs=inputs)
+        print("🔧 Crew instance created successfully")
+        
+        print("🚀 Starting crew execution...")
+        # Add timeout and better error handling
+        import signal
+        
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Crew execution timed out after 10 minutes")
+        
+        # Set timeout for 10 minutes
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(600)  # 10 minutes
+        
+        try:
+            result = crew_instance.crew().kickoff(inputs=inputs)
+            signal.alarm(0)  # Cancel timeout
+        except TimeoutError as e:
+            print(f"⏰ {e}")
+            return
         
         print("\n🎉 Policy analysis completed successfully!")
         print("📊 Results:")

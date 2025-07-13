@@ -36,11 +36,35 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         # Configure Gemini LLM for CrewAI
         gemini_api_key = os.getenv('GEMINI_API_KEY')
         if gemini_api_key:
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                google_api_key=gemini_api_key,
-                temperature=0.7
-            )
+            # Try GROQ instead as it's more compatible with CrewAI
+            from langchain_groq import ChatGroq
+            groq_api_key = os.getenv('GROQ_API_KEY')
+            if groq_api_key:
+                # Check if we should use Weave API instead
+                weave_api_key = os.getenv('WEAVE_API_KEY')
+                if weave_api_key:
+                    from langchain_openai import ChatOpenAI
+                    self.llm = ChatOpenAI(
+                        model="openai/meta-llama/Llama-4-Scout-17B-16E-Instruct",
+                        base_url="https://api.inference.wandb.ai/v1",
+                        api_key=weave_api_key,
+                        temperature=0.7,
+                        default_headers={"OpenAI-Project": "crewai/pop_smoke"}
+                    )
+                else:
+                    self.llm = ChatGroq(
+                        model="llama-3.1-70b-versatile",
+                        api_key=groq_api_key,
+                        temperature=0.7
+                    )
+            else:
+                # Fallback to simpler Gemini configuration
+                self.llm = ChatGoogleGenerativeAI(
+                    model="gemini-1.5-flash",
+                    google_api_key=gemini_api_key,
+                    temperature=0.7,
+                    convert_system_message_to_human=True  # This helps with CrewAI compatibility
+                )
         else:
             raise ValueError("GEMINI_API_KEY environment variable is required")
 
@@ -323,7 +347,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         return Crew(
             agents=self.agents, # Automatically created by the @agent decorator
             tasks=self.tasks, # Automatically created by the @task decorator
-            process=Process.hierarchical,
+            process=Process.sequential,  # Changed from hierarchical to sequential
             verbose=True,
-            manager_llm=self.llm,
+            # manager_llm=self.llm,  # Commented out since sequential doesn't need manager
         )
