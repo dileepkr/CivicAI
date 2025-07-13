@@ -27,24 +27,16 @@ class WeaveDebateSystem(BaseDebateSystem):
     def __init__(self):
         super().__init__("weave_debate")
         
-        # Check if Weave tracing is disabled via environment variable
-        import os
-        weave_tracing_disabled = os.getenv('WEAVE_DISABLE_TRACING', '0') == '1'
-        
-        if WEAVE_AVAILABLE and not weave_tracing_disabled:
-            # Only initialize Weave if tracing is not disabled
+        if WEAVE_AVAILABLE:
+            # Initialize Weave if available
             weave.init(project_name="civicai-hackathon")
             self.weave_enabled = True
             print(f"🔗 Weave System Active - Session: {self.session_id}")
             print(f"📊 View traces at: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-hackathon")
         else:
-            # Disable Weave tracing to prevent circular reference issues
-            os.environ['WEAVE_DISABLE_TRACING'] = '1'
-            os.environ['WEAVE_AUTO_TRACE'] = '0'
-            os.environ['WEAVE_AUTO_PATCH'] = '0'
             self.weave_enabled = False
             print(f"🔗 Weave System Active (Tracing Disabled) - Session: {self.session_id}")
-            print("⚠️  Weave tracing disabled to prevent circular reference issues")
+            print("⚠️  Weave not available - install with: pip install weave")
     
     def _weave_op(self, func):
         """Decorator wrapper for weave operations"""
@@ -82,6 +74,7 @@ class WeaveDebateSystem(BaseDebateSystem):
         
         return personas
     
+    @weave.op() if WEAVE_AVAILABLE else lambda x: x
     def load_policy_with_tracing(self, policy_name: str) -> Dict[str, Any]:
         """Load policy with weave tracing"""
         print(f"\n📄 Loading Policy: {policy_name}")
@@ -98,6 +91,7 @@ class WeaveDebateSystem(BaseDebateSystem):
             
             return policy_info
     
+    @weave.op() if WEAVE_AVAILABLE else lambda x: x
     def identify_stakeholders_with_tracing(self, policy_text: str) -> List[Dict[str, Any]]:
         """Identify stakeholders with weave tracing"""
         print(f"\n🎯 Identifying Stakeholders...")
@@ -314,6 +308,7 @@ class WeaveDebateSystem(BaseDebateSystem):
             
             return round_results
     
+    @weave.op() if WEAVE_AVAILABLE else lambda x: x
     def run_debate(self, policy_name: str) -> Dict[str, Any]:
         """Run complete debate with full Weave tracing"""
         
