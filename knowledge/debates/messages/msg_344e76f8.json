@@ -1,0 +1,13 @@
+{
+  "message_id": "msg_344e76f8",
+  "sender": "Tenants",
+  "receiver": "Landlords",
+  "message_type": "argument",
+  "content": "I must respectfully disagree with your position for these reasons.",
+  "context": {
+    "topic": "Economic Viability of Rental Properties and Impact on Housing Supply",
+    "round": 2
+  },
+  "timestamp": "2025-07-12T17:04:51.815580",
+  "requires_response": true
+}

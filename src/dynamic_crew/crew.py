@@ -296,15 +296,11 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         debate_agents = [
             self.debate_moderator_agent(),
             self.coordinator_agent(),
-            self.policy_discovery_agent(),
             self.policy_debate_agent(),
         ] + stakeholder_agents
         
         # Debate-specific tasks
         debate_tasks = [
-            self.receive_query_task(),
-            self.fetch_policy_text_task(),
-            self.analyze_policy_text_task(),
             self.stakeholder_analysis_task(),
             self.analyze_debate_topics_task(),
             self.initiate_debate_session_task(),
@@ -316,7 +312,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         return Crew(
             agents=debate_agents,
             tasks=debate_tasks,
-            process=Process.sequential,
+            process=Process.hierarchical,
             verbose=True,
             manager_llm=self.llm,
         )
@@ -327,7 +323,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         return Crew(
             agents=self.agents, # Automatically created by the @agent decorator
             tasks=self.tasks, # Automatically created by the @task decorator
-            process=Process.sequential,
+            process=Process.hierarchical,
             verbose=True,
             manager_llm=self.llm,
         )

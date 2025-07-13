@@ -546,7 +546,7 @@ class KnowledgeBaseManager(BaseTool):
                 knowledge_data = KnowledgeBase(
                     stakeholder_name=stakeholder_name,
                     research_data=research_data,
-                    timestamp=pd.Timestamp.now(),
+                    timestamp=pd.Timestamp.now().isoformat(),
                     version=1
                 )
                 
@@ -839,7 +839,7 @@ class ArgumentGenerator(BaseTool):
                 
                 # Ensure proper timestamp
                 if 'timestamp' not in argument_data:
-                    argument_data['timestamp'] = pd.Timestamp.now()
+                    argument_data['timestamp'] = pd.Timestamp.now().isoformat()
                 
                 # Validate argument
                 validated_argument = Argument(**argument_data)
@@ -878,7 +878,7 @@ class A2AMessenger(BaseTool):
                 message_type=message_type,
                 content=content,
                 context=message_context,
-                timestamp=pd.Timestamp.now(),
+                timestamp=pd.Timestamp.now().isoformat(),
                 requires_response=message_type in ["request", "argument", "query"]
             )
             
@@ -921,7 +921,7 @@ class DebateModerator(BaseTool):
                     moderator="Policy Debate Moderator",
                     participants=context_data.get('participants', []),
                     topics=context_data.get('topics', []),
-                    start_time=pd.Timestamp.now(),
+                    start_time=pd.Timestamp.now().isoformat(),
                     status="active"
                 )
                 
@@ -1004,7 +1004,7 @@ class DebateModerator(BaseTool):
                 # Update session with summary
                 session_data['summary'] = response.text
                 session_data['status'] = 'completed'
-                session_data['end_time'] = pd.Timestamp.now()
+                session_data['end_time'] = pd.Timestamp.now().isoformat()
                 
                 with open(session_file, 'w') as f:
                     json.dump(session_data, f, indent=2)
@@ -1020,7 +1020,7 @@ class DebateModerator(BaseTool):
                     session_data = json.load(f)
                 
                 session_data['status'] = 'completed'
-                session_data['end_time'] = pd.Timestamp.now()
+                session_data['end_time'] = pd.Timestamp.now().isoformat()
                 
                 with open(session_file, 'w') as f:
                     json.dump(session_data, f, indent=2)

@@ -1,0 +1,13 @@
+{
+    "request_id": "user123-policy456",
+    "user_profile": {
+      "persona": "Renter",
+      "location": "San Francisco, CA",
+      "initial_stance": "Undecided"
+    },
+    "policy_document": {
+      "title": "Rent Stabilization Ordinance Amendment",
+      "source_url": "https://example.com/policy",
+      "text": "SECTION 1. Purpose and Intent\n\nThis ordinance amends the Rent Stabilization Ordinance to establish new protections for tenants against excessive rent increases and hidden fees.\n\nSECTION 2. Key Provisions\n\n(a) Annual rent increases shall not exceed 5% of the base rent or the change in the Consumer Price Index, whichever is lower.\n\n(b) Landlords must provide 90 days written notice before implementing any rent increase.\n\n(c) No additional fees may be charged beyond rent and refundable security deposits, except for:\n   (1) Utilities directly metered to the unit\n   (2) Parking fees disclosed in the original lease\n   (3) Pet deposits as permitted by law\n\n(d) Landlords must include all required fees in advertised rent prices.\n\nSECTION 3. Enforcement\n\nViolations of this ordinance shall be subject to penalties of up to $1,000 per violation and tenant may recover actual damages plus attorney fees.\n\nSECTION 4. Effective Date\n\nThis ordinance shall take effect 30 days after passage."
+    }
+  } 

@@ -3,6 +3,7 @@ import sys
 import os
 from dotenv import load_dotenv
 from dynamic_crew.crew import DynamicCrewAutomationForPolicyAnalysisAndDebateCrew
+import weave
 
 # Load environment variables
 load_dotenv()
@@ -11,6 +12,8 @@ load_dotenv()
 # crew locally, so refrain from adding unnecessary logic into this file.
 # Replace with inputs you want to test with, it will automatically
 # interpolate any tasks and agents information
+
+weave.init(project_name="civicAI")
 
 def run():
     """

@@ -1,0 +1,12 @@
+{
+  "message_id": "msg_c220641c",
+  "sender": "Landlords / Landlord's Agents Agent",
+  "receiver": "Prospective and Current Tenants Agent",
+  "message_type": "argument",
+  "content": "I believe we need to find common ground on this issue.",
+  "context": {
+    "topic_id": "economic_impacts"
+  },
+  "timestamp": "2025-07-12T16:50:49.127941",
+  "requires_response": true
+}

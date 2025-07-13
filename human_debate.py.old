@@ -1,0 +1,760 @@
+#!/usr/bin/env python
+"""
+Enhanced Human-Like Policy Debate System with Active Moderator
+Real stakeholders debating like actual people with personalities, emotions, and guided discussions
+"""
+
+import os
+import json
+import time
+import uuid
+from datetime import datetime
+from dotenv import load_dotenv
+import weave
+from typing import Dict, List, Any, Optional
+import random
+
+from src.dynamic_crew.tools.custom_tool import (
+    PolicyFileReader,
+    StakeholderIdentifier,
+    KnowledgeBaseManager,
+    StakeholderResearcher,
+    TopicAnalyzer,
+    ArgumentGenerator,
+    A2AMessenger,
+    DebateModerator
+)
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Weave with project name
+weave.init(project_name="civicai-human-debate")
+
+class HumanModerator:
+    """
+    AI moderator with personality and natural speech patterns
+    """
+    
+    def __init__(self):
+        self.name = "Dr. Patricia Williams"
+        self.background = "Former journalist and policy expert, now facilitates public debates"
+        self.personality = "Professional but warm, keeps discussions focused while allowing passion"
+        self.transition_phrases = [
+            "Let's move to our next important topic...",
+            "This brings us to another crucial issue...",
+            "I'd like to shift our focus to...",
+            "Building on what we've heard, let's explore...",
+            "Now, let's examine..."
+        ]
+        self.interruption_phrases = [
+            "Hold on, let me make sure everyone gets a chance to respond...",
+            "I want to give everyone a chance to address this point...",
+            "Let's hear from other perspectives on this...",
+            "That's a strong point - how do others respond to that?",
+            "I'm seeing some passionate reactions here..."
+        ]
+        self.wrap_up_phrases = [
+            "As we wrap up this topic...",
+            "Before we move on...",
+            "Let me summarize what I'm hearing...",
+            "This seems to be a key point of disagreement...",
+            "I think we've identified the core tensions here..."
+        ]
+    
+    def introduce_debate(self, policy_title: str, participants: List[str], topics: List[str]) -> str:
+        """Opening introduction"""
+        return f"""
+*adjusts glasses and looks at the panel*
+
+Good evening, everyone. I'm Dr. Patricia Williams, and I'll be moderating tonight's discussion on {policy_title}.
+
+We have {len(participants)} distinguished panelists with us tonight: {', '.join(participants)}. Each brings a unique perspective to this important policy debate.
+
+*gestures to the agenda*
+
+Tonight we'll explore {len(topics)} key areas: {', '.join(topics[:3])}{'...' if len(topics) > 3 else ''}. 
+
+I encourage passionate but respectful dialogue. This is about real people and real consequences.
+
+*turns to the panel*
+
+Let's begin with opening statements. Each of you will have a chance to present your perspective, and then we'll dive into the details.
+"""
+    
+    def transition_to_topic(self, topic_title: str, topic_number: int, total_topics: int) -> str:
+        """Transition to new topic"""
+        phrase = random.choice(self.transition_phrases)
+        return f"""
+*leans forward slightly*
+
+{phrase} {topic_title}.
+
+*looks around the table*
+
+This is topic {topic_number} of {total_topics}, and I suspect we'll see some strong opinions here. Let's hear how each of you views this issue.
+"""
+    
+    def facilitate_exchange(self, speaker1: str, speaker2: str, topic: str) -> str:
+        """Encourage direct exchange between speakers"""
+        return f"""
+*notices the tension*
+
+{speaker1}, I can see you have a strong reaction to what {speaker2} just said. Please respond directly to their point about {topic}.
+
+*turns to {speaker2}*
+
+And {speaker2}, I want you to have a chance to respond to {speaker1}'s concerns as well.
+"""
+    
+    def interrupt_for_balance(self, dominant_speaker: str, quiet_speakers: List[str]) -> str:
+        """Interrupt to give others a chance"""
+        phrase = random.choice(self.interruption_phrases)
+        quiet_list = ', '.join(quiet_speakers)
+        return f"""
+*raises hand gently*
+
+{dominant_speaker}, you're making important points, but {phrase}
+
+*turns to others*
+
+{quiet_list}, I'd like to hear your thoughts on this. How do you see this issue?
+"""
+    
+    def wrap_up_topic(self, topic_title: str, key_points: List[str]) -> str:
+        """Wrap up discussion of a topic"""
+        phrase = random.choice(self.wrap_up_phrases)
+        return f"""
+*pauses thoughtfully*
+
+{phrase} on {topic_title}.
+
+*counts on fingers*
+
+I'm hearing several key tensions: {', '.join(key_points[:3])}. These seem to be the fundamental disagreements we need to grapple with.
+
+*looks at the panel*
+
+Let's carry these insights forward as we continue.
+"""
+    
+    def synthesize_conclusion(self, policy_title: str, all_arguments: List[Dict], participants: List[str]) -> str:
+        """Create unbiased conclusion based on all arguments"""
+        return f"""
+*removes glasses and looks thoughtfully at the panel*
+
+Thank you all for this rich discussion on {policy_title}. As someone who's moderated hundreds of these debates, I want to offer an unbiased synthesis of what we've heard tonight.
+
+*gestures to notes*
+
+**The Situation As I See It:**
+
+From {participants[0]}'s perspective, we heard genuine concerns about [their main concerns]. Their lived experience brings credibility to arguments about [key points].
+
+{participants[1] if len(participants) > 1 else "Other participants"} raised equally valid points about [their concerns], particularly regarding [specific issues].
+
+**Areas of Surprising Agreement:**
+- All participants seem to agree that [common ground]
+- Everyone acknowledges the complexity of [shared challenge]
+- There's consensus that [agreed-upon point]
+
+**The Core Tensions:**
+1. **Immediate vs. Long-term**: Some prioritize immediate relief, others focus on sustainable solutions
+2. **Individual vs. Collective**: Tension between personal rights and community needs  
+3. **Practical vs. Idealistic**: Disagreement on what's actually achievable
+
+**My Unbiased Assessment:**
+This policy addresses real problems, but implementation will require balancing competing interests. The most viable path forward likely involves [practical middle ground] while addressing [legitimate concerns from all sides].
+
+*looks directly at audience*
+
+The truth is, all our panelists raised valid points. Good policy isn't about winning debates - it's about finding solutions that work for real people in real situations.
+
+*pauses*
+
+That's the situation as I see it. Thank you all for your participation tonight.
+"""
+
+class HumanPersona:
+    """
+    Creates human-like personas for debate agents
+    """
+    
+    PERSONA_TEMPLATES = {
+        "Tenants": {
+            "name": "Maria Rodriguez",
+            "age": 34,
+            "background": "Single mother working two jobs to afford rent in SF",
+            "personality": "passionate, articulate, speaks from personal experience",
+            "speech_style": "direct, emotional, uses personal anecdotes",
+            "key_phrases": ["As someone who's lived this...", "Let me tell you what really happens...", "This isn't about numbers, it's about families"],
+            "concerns": ["rent affordability", "housing stability", "family welfare"],
+            "emotional_triggers": ["eviction fears", "rising costs", "displacement"],
+            "response_style": "interrupts when emotional, uses personal stories to counter statistics"
+        },
+        "Landlords": {
+            "name": "Robert Chen",
+            "age": 52,
+            "background": "Small property owner with 8 rental units, former contractor",
+            "personality": "practical, business-minded, but understands tenant struggles",
+            "speech_style": "measured, uses business examples, appeals to economic logic",
+            "key_phrases": ["From a practical standpoint...", "I've seen what happens when...", "Let's look at the real numbers here"],
+            "concerns": ["property maintenance costs", "regulatory compliance", "investment viability"],
+            "emotional_triggers": ["unfair regulations", "financial losses", "property damage"],
+            "response_style": "becomes defensive when called greedy, uses concrete examples"
+        },
+        "City Officials": {
+            "name": "Councilwoman Sarah Kim",
+            "age": 41,
+            "background": "Former urban planner, elected to city council 3 years ago",
+            "personality": "diplomatic, data-driven, seeks compromise",
+            "speech_style": "formal but approachable, cites studies and statistics",
+            "key_phrases": ["The data shows us...", "We need to balance...", "Our constituents deserve"],
+            "concerns": ["policy effectiveness", "public welfare", "political feasibility"],
+            "emotional_triggers": ["housing crisis", "constituent pressure", "budget constraints"],
+            "response_style": "tries to find middle ground, cites research and best practices"
+        },
+        "Housing Advocates": {
+            "name": "Dr. James Washington",
+            "age": 39,
+            "background": "Housing rights attorney and community organizer",
+            "personality": "passionate advocate, well-informed, confrontational when needed",
+            "speech_style": "forceful, uses legal terminology, challenges opposition directly",
+            "key_phrases": ["This is a fundamental right...", "The law clearly states...", "We cannot stand by while..."],
+            "concerns": ["tenant rights", "housing justice", "systemic inequality"],
+            "emotional_triggers": ["discrimination", "exploitation", "displacement"],
+            "response_style": "challenges opponents directly, quotes legal precedents"
+        }
+    }
+    
+    @classmethod
+    def create_persona(cls, stakeholder_name: str, stakeholder_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a human persona for a stakeholder"""
+        
+        # Get base template or create generic one
+        template = cls.PERSONA_TEMPLATES.get(stakeholder_name, {
+            "name": f"{stakeholder_name} Representative",
+            "age": random.randint(25, 65),
+            "background": f"Experienced advocate for {stakeholder_name.lower()}",
+            "personality": "articulate, passionate about their cause",
+            "speech_style": "direct, uses examples from experience",
+            "key_phrases": [f"Speaking for {stakeholder_name.lower()}...", "Our experience shows...", "This directly affects us because..."],
+            "concerns": stakeholder_data.get("interests", []),
+            "emotional_triggers": stakeholder_data.get("key_concerns", []),
+            "response_style": "responds with facts and personal experience"
+        })
+        
+        # Enhance with stakeholder-specific data
+        enhanced_persona = {
+            **template,
+            "stakeholder_group": stakeholder_name,
+            "likely_stance": stakeholder_data.get("likely_stance", "neutral"),
+            "specific_interests": stakeholder_data.get("interests", []),
+            "policy_concerns": stakeholder_data.get("key_concerns", []),
+            "impact_level": stakeholder_data.get("impact", "moderate")
+        }
+        
+        return enhanced_persona
+
+class ConversationalDebateSystem:
+    """
+    Enhanced human-like debate system with active moderator and natural conversation flow
+    """
+    
+    def __init__(self):
+        self.policy_reader = PolicyFileReader()
+        self.stakeholder_identifier = StakeholderIdentifier()
+        self.kb_manager = KnowledgeBaseManager()
+        self.stakeholder_researcher = StakeholderResearcher()
+        self.topic_analyzer = TopicAnalyzer()
+        self.argument_generator = ArgumentGenerator()
+        self.a2a_messenger = A2AMessenger()
+        self.debate_moderator = DebateModerator()
+        
+        # Enhanced session tracking
+        self.session_id = f"enhanced_debate_{uuid.uuid4().hex[:8]}"
+        self.debate_round = 0
+        self.current_topic = 0
+        self.personas = {}
+        self.moderator = HumanModerator()
+        self.conversation_history = []
+        self.all_arguments = []
+        self.speaking_time = {}  # Track who's been speaking
+        
+        print(f"🎭 Enhanced Human-Like Debate System Active - Session: {self.session_id}")
+        print(f"👩‍💼 Moderator: {self.moderator.name}")
+        print(f"📊 View traces at: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-human-debate")
+    
+    @weave.op()
+    def create_human_personas(self, stakeholder_list: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Create human personas for all stakeholders"""
+        print(f"\n👥 Creating Human Personas...")
+        
+        with weave.attributes({
+            "stakeholder_count": len(stakeholder_list),
+            "session_id": self.session_id,
+            "step": "create_personas"
+        }):
+            personas = {}
+            
+            for stakeholder in stakeholder_list:
+                stakeholder_name = stakeholder.get('name', 'Unknown')
+                persona = HumanPersona.create_persona(stakeholder_name, stakeholder)
+                personas[stakeholder_name] = persona
+                
+                # Initialize speaking time tracking
+                self.speaking_time[stakeholder_name] = 0
+                
+                print(f"   🎭 {persona['name']} ({stakeholder_name})")
+                print(f"      Age: {persona['age']}, Background: {persona['background'][:60]}...")
+                print(f"      Style: {persona['speech_style']}")
+                print(f"      Response Style: {persona['response_style']}")
+            
+            self.personas = personas
+            return personas
+    
+    @weave.op()
+    def generate_human_argument(self, persona: Dict[str, Any], topic: Dict[str, Any], argument_type: str, context: str = "") -> str:
+        """Generate human-like argument based on persona and context"""
+        
+        stakeholder_name = persona['stakeholder_group']
+        person_name = persona['name']
+        
+        print(f"\n🗣️  {person_name} ({stakeholder_name}) speaking...")
+        
+        # Track speaking time
+        self.speaking_time[stakeholder_name] += 1
+        
+        with weave.attributes({
+            "speaker_name": person_name,
+            "stakeholder_group": stakeholder_name,
+            "argument_type": argument_type,
+            "topic": topic.get('title', 'Unknown'),
+            "context": context,
+            "session_id": self.session_id,
+            "debate_round": self.debate_round,
+            "step": "human_argument"
+        }):
+            # Use the argument generator with enhanced context
+            argument_result = self.argument_generator._run(
+                stakeholder_name,
+                json.dumps(topic),
+                argument_type
+            )
+            
+            if argument_result.startswith("Error"):
+                return f"*{person_name} struggles to find words* I... this is difficult to articulate, but..."
+            
+            # Convert structured response to natural speech
+            try:
+                structured_data = json.loads(argument_result)
+                content = structured_data.get('content', '')
+                evidence = structured_data.get('evidence', [])
+                
+                # Make it more conversational and contextual
+                human_speech = self._humanize_argument(persona, content, evidence, argument_type, context)
+                
+                # Store for later synthesis
+                self.all_arguments.append({
+                    "speaker": person_name,
+                    "stakeholder_group": stakeholder_name,
+                    "topic": topic.get('title', 'Unknown'),
+                    "content": content,
+                    "evidence": evidence,
+                    "argument_type": argument_type,
+                    "timestamp": datetime.now().isoformat()
+                })
+                
+                return human_speech
+                
+            except json.JSONDecodeError:
+                return f"*{person_name} speaks passionately* Look, the bottom line is..."
+    
+    def _humanize_argument(self, persona: Dict[str, Any], content: str, evidence: List[str], argument_type: str, context: str = "") -> str:
+        """Convert structured argument to natural human speech with context awareness"""
+        
+        person_name = persona['name']
+        response_style = persona.get('response_style', 'responds thoughtfully')
+        
+        # Physical cues based on argument type and context
+        if "responding to" in context.lower():
+            physical_cues = ["*leans forward intensely*", "*gestures emphatically*", "*voice rising slightly*"]
+        elif argument_type == "rebuttal":
+            physical_cues = ["*shakes head*", "*looks directly at opponent*", "*taps table for emphasis*"]
+        else:
+            physical_cues = ["*adjusts posture*", "*looks around table*", "*speaks clearly*"]
+        
+        physical_cue = random.choice(physical_cues)
+        
+        # Conversational starters based on context
+        if "responding to" in context.lower():
+            starters = ["Wait, hold on...", "That's not how I see it...", "I have to push back on that...", "Let me respond to that point..."]
+        elif argument_type == "rebuttal":
+            starters = ["I disagree with that completely...", "That's simply not true...", "I need to challenge that..."]
+        else:
+            starters = persona.get('key_phrases', ["Let me be clear..."])
+        
+        starter = random.choice(starters if isinstance(starters, list) else [starters])
+        
+        # Emotional intensity based on persona and context
+        if any(trigger in content.lower() for trigger in persona.get('emotional_triggers', [])):
+            intensity = ["*voice passionate*", "*speaking with conviction*", "*clearly emotional*"]
+            intensity_cue = random.choice(intensity)
+        else:
+            intensity_cue = ""
+        
+        # Build the human speech
+        human_speech = f"{physical_cue}\n\n{starter} {content}"
+        
+        # Add evidence naturally
+        if evidence:
+            evidence_intro = ["Look at the facts:", "The evidence shows:", "We know that:"]
+            human_speech += f"\n\n{random.choice(evidence_intro)} {evidence[0]}"
+        
+        # Add emotional intensity if present
+        if intensity_cue:
+            human_speech += f"\n\n{intensity_cue}"
+        
+        # Add conversational elements
+        return self._add_conversational_elements(human_speech, persona, argument_type, context)
+    
+    def _add_conversational_elements(self, content: str, persona: Dict[str, Any], argument_type: str, context: str = "") -> str:
+        """Add natural conversational elements"""
+        
+        # Add natural pauses and emphasis
+        conversation_elements = []
+        
+        if "responding to" in context.lower():
+            conversation_elements.extend([
+                "You know what?",
+                "Here's the thing...",
+                "I need to be honest here...",
+                "Let me be straight with you..."
+            ])
+        
+        if argument_type == "rebuttal":
+            conversation_elements.extend([
+                "That's just not realistic...",
+                "I've seen this before...",
+                "We tried that approach...",
+                "The reality is..."
+            ])
+        
+        # Add dramatic pauses
+        if random.random() < 0.3:  # 30% chance
+            content += "\n\n*pauses dramatically*"
+        
+        # Add conversational element
+        if conversation_elements and random.random() < 0.4:  # 40% chance
+            element = random.choice(conversation_elements)
+            content = f"{element} {content}"
+        
+        return content
+    
+    @weave.op()
+    def facilitate_natural_exchange(self, personas: Dict[str, Dict[str, Any]], topic: Dict[str, Any], exchange_type: str) -> List[str]:
+        """Facilitate natural back-and-forth exchange on a topic"""
+        
+        print(f"\n💬 Natural Exchange: {topic.get('title', 'Discussion')}")
+        
+        exchanges = []
+        persona_list = list(personas.values())
+        
+        with weave.attributes({
+            "topic": topic.get('title', 'Unknown'),
+            "exchange_type": exchange_type,
+            "participants": len(persona_list),
+            "session_id": self.session_id,
+            "step": "natural_exchange"
+        }):
+            # First speaker introduces the topic
+            first_speaker = persona_list[0]
+            first_statement = self.generate_human_argument(first_speaker, topic, "claim")
+            exchanges.append(first_statement)
+            print(f"\n{first_statement}")
+            time.sleep(1)
+            
+            # Other speakers respond in turn
+            for i in range(1, len(persona_list)):
+                responder = persona_list[i]
+                previous_speaker = persona_list[i-1]['name']
+                
+                # Context-aware response
+                context = f"responding to {previous_speaker}'s points about {topic.get('title', 'this issue')}"
+                response = self.generate_human_argument(responder, topic, "rebuttal", context)
+                exchanges.append(response)
+                print(f"\n{response}")
+                time.sleep(1)
+                
+                # Moderator might interject
+                if i == len(persona_list) - 1 and len(persona_list) > 2:
+                    moderator_interjection = self.moderator.facilitate_exchange(
+                        persona_list[0]['name'], 
+                        responder['name'], 
+                        topic.get('title', 'this topic')
+                    )
+                    exchanges.append(moderator_interjection)
+                    print(f"\n{moderator_interjection}")
+                    time.sleep(1)
+                    
+                    # First speaker responds to final point
+                    final_context = f"responding to {responder['name']}'s challenge"
+                    final_response = self.generate_human_argument(first_speaker, topic, "rebuttal", final_context)
+                    exchanges.append(final_response)
+                    print(f"\n{final_response}")
+            
+            # Add to conversation history
+            self.conversation_history.extend(exchanges)
+            
+            return exchanges
+    
+    @weave.op()
+    def run_multi_topic_debate(self, personas: Dict[str, Dict[str, Any]], topics_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Run debate across multiple topics with moderator guidance"""
+        
+        print(f"\n🎭 === MULTI-TOPIC DEBATE SESSION ===")
+        
+        debate_results = {
+            "session_id": self.session_id,
+            "topics_discussed": [],
+            "moderator_transitions": [],
+            "natural_exchanges": [],
+            "speaking_stats": self.speaking_time.copy()
+        }
+        
+        with weave.attributes({
+            "total_topics": len(topics_list),
+            "participants": len(personas),
+            "session_id": self.session_id,
+            "step": "multi_topic_debate"
+        }):
+            # Discuss each topic
+            for topic_num, topic in enumerate(topics_list, 1):
+                print(f"\n📋 Topic {topic_num}/{len(topics_list)}: {topic.get('title', 'Unknown')}")
+                
+                # Moderator introduces topic
+                if topic_num > 1:
+                    transition = self.moderator.transition_to_topic(
+                        topic.get('title', 'Unknown'), 
+                        topic_num, 
+                        len(topics_list)
+                    )
+                    debate_results["moderator_transitions"].append(transition)
+                    print(f"\n{transition}")
+                    time.sleep(1)
+                
+                # Natural exchange on this topic
+                exchanges = self.facilitate_natural_exchange(personas, topic, "discussion")
+                
+                # Check for balance - if someone hasn't spoken much, moderator intervenes
+                self._check_speaking_balance(personas)
+                
+                topic_result = {
+                    "topic_number": topic_num,
+                    "topic_title": topic.get('title', 'Unknown'),
+                    "exchanges": exchanges,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                debate_results["topics_discussed"].append(topic_result)
+                debate_results["natural_exchanges"].extend(exchanges)
+                
+                # Moderator wraps up topic
+                if topic_num < len(topics_list):
+                    key_points = [f"disagreement about {topic.get('title', 'this issue')}"]
+                    wrap_up = self.moderator.wrap_up_topic(topic.get('title', 'Unknown'), key_points)
+                    print(f"\n{wrap_up}")
+                    time.sleep(1)
+                
+                print(f"\n✅ Topic {topic_num} complete")
+                time.sleep(2)
+        
+        return debate_results
+    
+    def _check_speaking_balance(self, personas: Dict[str, Dict[str, Any]]):
+        """Check if speaking time is balanced, have moderator intervene if needed"""
+        
+        total_speaking = sum(self.speaking_time.values())
+        if total_speaking < 2:
+            return
+        
+        # Find who's spoken the most and least
+        most_spoken = max(self.speaking_time, key=self.speaking_time.get)
+        least_spoken = min(self.speaking_time, key=self.speaking_time.get)
+        
+        # If imbalance is significant, moderator intervenes
+        if self.speaking_time[most_spoken] > self.speaking_time[least_spoken] + 2:
+            quiet_speakers = [name for name, count in self.speaking_time.items() 
+                            if count < self.speaking_time[most_spoken] - 1]
+            
+            if quiet_speakers:
+                interruption = self.moderator.interrupt_for_balance(
+                    personas[most_spoken]['name'], 
+                    [personas[name]['name'] for name in quiet_speakers]
+                )
+                print(f"\n{interruption}")
+                time.sleep(1)
+    
+    @weave.op()
+    def synthesize_unbiased_conclusion(self, policy_info: Dict[str, Any], personas: Dict[str, Dict[str, Any]]) -> str:
+        """Generate unbiased conclusion based on all arguments presented"""
+        
+        print(f"\n📊 Synthesizing Unbiased Conclusion...")
+        
+        with weave.attributes({
+            "total_arguments": len(self.all_arguments),
+            "participants": len(personas),
+            "session_id": self.session_id,
+            "step": "unbiased_conclusion"
+        }):
+            participant_names = [persona['name'] for persona in personas.values()]
+            policy_title = policy_info.get('title', 'This Policy')
+            
+            # Create comprehensive conclusion
+            conclusion = self.moderator.synthesize_conclusion(
+                policy_title,
+                self.all_arguments,
+                participant_names
+            )
+            
+            return conclusion
+    
+    @weave.op()
+    def run_enhanced_human_debate(self, policy_name: str) -> Dict[str, Any]:
+        """Run complete enhanced human-like debate session with active moderator"""
+        
+        print(f"\n🚀 === ENHANCED HUMAN-LIKE POLICY DEBATE: {policy_name.upper()} ===")
+        print(f"🎭 Session ID: {self.session_id}")
+        
+        start_time = datetime.now()
+        
+        with weave.attributes({
+            "policy_name": policy_name,
+            "session_id": self.session_id,
+            "debate_type": "enhanced_human_conversational",
+            "step": "enhanced_full_debate"
+        }):
+            try:
+                # Step 1: Load Policy
+                print(f"\n📄 Loading Policy...")
+                policy_data = self.policy_reader._run(f"{policy_name}.json")
+                if policy_data.startswith("Error"):
+                    raise Exception(f"Policy loading failed: {policy_data}")
+                
+                policy_info = json.loads(policy_data)
+                policy_text = policy_info.get("text", "")
+                
+                print(f"✅ Policy: {policy_info.get('title', 'Unknown')}")
+                
+                # Step 2: Identify Stakeholders
+                print(f"\n🎯 Identifying Stakeholders...")
+                stakeholder_result = self.stakeholder_identifier._run(policy_text)
+                if stakeholder_result.startswith("Error"):
+                    raise Exception(f"Stakeholder identification failed: {stakeholder_result}")
+                
+                stakeholder_data = json.loads(stakeholder_result)
+                stakeholder_list = stakeholder_data.get('stakeholders', [])
+                
+                # Step 3: Create Human Personas
+                personas = self.create_human_personas(stakeholder_list)
+                
+                # Step 4: Analyze Multiple Debate Topics
+                stakeholder_summary = {
+                    "stakeholders": stakeholder_list,
+                    "total_count": len(stakeholder_list)
+                }
+                
+                topic_result = self.topic_analyzer._run(policy_text, json.dumps(stakeholder_summary))
+                if not topic_result.startswith("Error"):
+                    topics_data = json.loads(topic_result)
+                    topics_list = topics_data.get('topics', [])
+                    # Use top 3 topics for focused discussion
+                    topics_list = sorted(topics_list, key=lambda x: x.get('priority', 0), reverse=True)[:3]
+                else:
+                    topics_list = [{"title": "Policy Impact and Implementation", "priority": 8}]
+                
+                print(f"\n📋 Key Debate Topics:")
+                for i, topic in enumerate(topics_list, 1):
+                    print(f"   {i}. {topic.get('title', 'Unknown')} (Priority: {topic.get('priority', 'N/A')})")
+                
+                # Step 5: Moderator Introduction
+                participant_names = [persona['name'] for persona in personas.values()]
+                topic_titles = [topic.get('title', 'Unknown') for topic in topics_list]
+                
+                introduction = self.moderator.introduce_debate(
+                    policy_info.get('title', 'This Policy'),
+                    participant_names,
+                    topic_titles
+                )
+                print(f"\n{introduction}")
+                time.sleep(2)
+                
+                # Step 6: Enhanced Multi-Topic Debate
+                debate_results = self.run_multi_topic_debate(personas, topics_list)
+                
+                # Step 7: Unbiased Conclusion
+                print(f"\n🎯 === MODERATOR'S UNBIASED CONCLUSION ===")
+                conclusion = self.synthesize_unbiased_conclusion(policy_info, personas)
+                print(f"\n{conclusion}")
+                
+                # Compile final results
+                end_time = datetime.now()
+                final_results = {
+                    "session_id": self.session_id,
+                    "policy_info": policy_info,
+                    "personas": personas,
+                    "topics_discussed": topics_list,
+                    "debate_results": debate_results,
+                    "moderator_conclusion": conclusion,
+                    "all_arguments": self.all_arguments,
+                    "conversation_history": self.conversation_history,
+                    "speaking_stats": self.speaking_time,
+                    "start_time": start_time.isoformat(),
+                    "end_time": end_time.isoformat(),
+                    "total_duration": (end_time - start_time).total_seconds()
+                }
+                
+                print(f"\n🎉 === ENHANCED DEBATE SESSION COMPLETED ===")
+                print(f"🎭 Participants: {', '.join(participant_names)}")
+                print(f"📋 Topics Covered: {len(topics_list)}")
+                print(f"📊 Total Arguments: {len(self.all_arguments)}")
+                print(f"💬 Conversation Turns: {len(self.conversation_history)}")
+                print(f"⏱️  Duration: {final_results['total_duration']:.1f} seconds")
+                print(f"🔗 View traces: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-human-debate")
+                
+                return final_results
+                
+            except Exception as e:
+                print(f"❌ Error in enhanced human debate: {e}")
+                raise
+
+def main():
+    """Main function for enhanced human-like debate"""
+    
+    if len(sys.argv) < 2:
+        print("Usage: python human_debate.py <policy_name>")
+        print("Example: python human_debate.py policy_1")
+        return
+    
+    policy_name = sys.argv[1]
+    if policy_name.endswith('.json'):
+        policy_name = policy_name[:-5]
+    
+    policy_file_path = os.path.join("test_data", f"{policy_name}.json")
+    if not os.path.exists(policy_file_path):
+        print(f"❌ Error: Policy file not found at {policy_file_path}")
+        return
+    
+    # Run enhanced human-like debate
+    debate_system = ConversationalDebateSystem()
+    results = debate_system.run_enhanced_human_debate(policy_name)
+    
+    print(f"\n📁 Enhanced human debate session completed!")
+    print(f"🎭 Personas created: {len(results.get('personas', {}))}")
+    print(f"📋 Topics discussed: {len(results.get('topics_discussed', []))}")
+    print(f"💬 Total exchanges: {len(results.get('conversation_history', []))}")
+    print(f"📊 Arguments recorded: {len(results.get('all_arguments', []))}")
+
+if __name__ == "__main__":
+    import sys
+    main() 

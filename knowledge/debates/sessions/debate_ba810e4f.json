@@ -1,0 +1,64 @@
+{
+  "session_id": "debate_ba810e4f",
+  "policy_name": "Rent Stabilization Ordinance Amendment",
+  "moderator": "Policy Debate Moderator",
+  "participants": [
+    "Tenants",
+    "Landlords"
+  ],
+  "topics": [
+    {
+      "topic_id": "rent_cap_efficacy",
+      "title": "Effectiveness and Economic Impact of Rent Control Caps",
+      "description": "This topic will delve into whether the proposed annual rent increase cap (5% or CPI, whichever is lower) effectively achieves housing affordability and stability for tenants, while considering its potential economic consequences for landlords and the broader housing market, including property values, maintenance, and new development.",
+      "priority": 10,
+      "stakeholders_involved": [
+        "Tenants",
+        "Landlords"
+      ],
+      "key_questions": [
+        "Does the proposed rent cap genuinely make housing more affordable for tenants without unintended negative consequences?",
+        "How will this cap impact landlords' ability to cover increasing operational costs (e.g., property taxes, maintenance, insurance, mortgages) and achieve a reasonable return on investment?",
+        "Will the rent cap disincentivize new housing construction or lead to landlords withdrawing units from the rental market, thereby reducing housing supply?",
+        "What are the long-term effects of such caps on property values and the overall investment climate in the rental sector?"
+      ]
+    },
+    {
+      "topic_id": "fee_restrictions_transparency",
+      "title": "Fair Practices and Transparency in Rental Fees",
+      "description": "This topic focuses on the policy's provisions regarding the prohibition of most additional fees, requiring all permissible fees to be included in advertised rent, and the specific exceptions allowed. It examines the balance between protecting tenants from hidden costs and allowing landlords to recover legitimate operational expenses.",
+      "priority": 9,
+      "stakeholders_involved": [
+        "Tenants",
+        "Landlords"
+      ],
+      "key_questions": [
+        "Are the currently prohibited 'additional fees' truly exploitative or do they cover legitimate administrative or service costs for landlords that are not covered by base rent?",
+        "How will requiring all permissible fees (like parking if applicable) to be included in advertised rent impact landlord advertising practices and pricing flexibility?",
+        "Is the current list of permitted exceptions (metered utilities, disclosed parking, pet deposits) sufficient, or are there other legitimate fees that should be allowed?",
+        "Will the elimination of certain fees lead landlords to increase base rent to compensate, potentially negating the intended tenant benefit?"
+      ]
+    },
+    {
+      "topic_id": "enforcement_fairness_burden",
+      "title": "Adequacy and Fairness of Enforcement Mechanisms",
+      "description": "This topic addresses the penalties for violations, including fines up to $1,000 per violation and the ability for tenants to recover actual damages and attorney fees. It will explore whether these enforcement measures are sufficient to deter violations and protect tenants, while also considering if they impose an excessive or disproportionate burden and risk on landlords.",
+      "priority": 8,
+      "stakeholders_involved": [
+        "Tenants",
+        "Landlords"
+      ],
+      "key_questions": [
+        "Are the proposed penalties (up to $1,000 per violation, plus damages and attorney fees) proportionate and fair for landlords, or do they create an undue financial risk and foster a litigious environment?",
+        "Will the threat of legal action and attorney fees be an effective deterrent against landlord non-compliance, or will it lead to an increase in frivolous lawsuits?",
+        "Are the resources and mechanisms in place for tenants to effectively utilize the legal avenue to recover damages and attorney fees without significant personal cost or burden?",
+        "How will this enforcement section impact the overall relationship between landlords and tenants, potentially leading to more adversarial interactions?"
+      ]
+    }
+  ],
+  "rounds": [],
+  "start_time": "2025-07-12T17:01:38.581506",
+  "end_time": "2025-07-12T17:02:20.420216",
+  "status": "completed",
+  "summary": ""
+}

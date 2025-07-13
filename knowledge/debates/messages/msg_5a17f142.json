@@ -1,0 +1,13 @@
+{
+  "message_id": "msg_5a17f142",
+  "sender": "Tenants",
+  "receiver": "Landlords",
+  "message_type": "argument",
+  "content": "Let me address your concerns about this policy.",
+  "context": {
+    "topic": "Economic Viability of Rental Properties and Impact on Housing Supply",
+    "round": 3
+  },
+  "timestamp": "2025-07-12T17:05:15.564866",
+  "requires_response": true
+}
