@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv lock:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)",
+      "Bash(make:*)",
+      "Bash(uv:*)",
+      "Bash(cp:*)",
+      "Bash(python:*)",
+      "mcp__ide__getDiagnostics",
+      "WebFetch(domain:calmatters.digitaldemocracy.org)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}

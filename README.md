@@ -1,9 +1,10 @@
-# CivicAI - Dynamic Policy Analysis & Debate System
+# CivicAI - Comprehensive Policy Analysis & Civic Engagement Platform
 
-An intelligent multi-agent system for policy analysis and stakeholder debate using CrewAI, Gemini API, Serper search, and advanced natural language processing.
+A sophisticated multi-agent system that combines dynamic policy analysis, stakeholder debate facilitation, and intelligent policy discovery across multiple levels of government. Built with CrewAI framework, supporting both Gemini API/Serper search and Exa API for comprehensive civic engagement.
 
 ## 🚀 Features
 
+### 📊 **Dynamic Policy Analysis & Debate**
 - **📁 Local Policy Analysis**: Read and analyze policy documents from local files
 - **🤖 Dynamic Agent Creation**: Automatically create specialized agents for each stakeholder
 - **🧠 AI-Powered Stakeholder Identification**: Use Gemini API to identify key stakeholders
@@ -12,67 +13,136 @@ An intelligent multi-agent system for policy analysis and stakeholder debate usi
 - **🎭 Automated Debate Facilitation**: Agents debate policy implications and generate balanced summaries
 - **🔍 Advanced Web Search**: Serper-powered web search for comprehensive policy research
 
+### 🏛️ **Multi-Level Policy Discovery**
+- **Multi-Level Government Search**: Federal, State (California), Local (San Francisco)
+- **Intelligent Policy Classification**: Automated domain and stakeholder impact analysis
+- **Real-time Discovery**: Up-to-date policy information from government sources
+- **Stakeholder-Aware**: Personalized policy relevance based on user roles
+- **Multi-Agent Architecture**: Scalable CrewAI-based design
+
 ## 🛠️ Setup
 
 ### Prerequisites
 - Python 3.10+
-- Gemini API key
-- Serper API key
+- UV package manager (recommended) or pip
+- API keys: Gemini API, Serper API, and/or Exa API
 
 ### Installation
 
-1. **Clone and navigate to the project**
-   ```bash
-   cd CivicAI
-   ```
+#### Option 1: UV (Recommended)
+Install [UV](https://docs.astral.sh/uv/) - the fast Python package manager:
 
-2. **Install dependencies**
-   ```bash
-   pip install -e .
-   ```
+```bash
+# On macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-3. **Set up environment variables**
-   Create a `.env` file in the root directory:
-   ```env
-   GEMINI_API_KEY=your_gemini_api_key_here
-   SERPER_API_KEY=your_serper_api_key_here
-   POLICY_DATA_PATH=./test_data
-   KNOWLEDGE_BASE_PATH=./knowledge
-   DEBUG=True
-   VERBOSE=True
-   ```
+# On Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Then install dependencies:
+```bash
+# Clone the repository
+git clone <repository-url>
+cd CivicAI
+
+# Install dependencies with UV
+uv sync
+
+# Install with development dependencies
+uv sync --extra dev
+```
+
+#### Option 2: Pip (Fallback)
+```bash
+cd CivicAI
+pip install -e .
+```
+
+### Configuration
+
+1. Copy `.env.example` to `.env`
+2. Add your API keys:
+```env
+# For debate system
+GEMINI_API_KEY=your_gemini_api_key_here
+SERPER_API_KEY=your_serper_api_key_here
+
+# For policy discovery
+EXA_API_KEY=your_exa_api_key_here
+
+# Optional configuration
+POLICY_DATA_PATH=./test_data
+KNOWLEDGE_BASE_PATH=./knowledge
+DEBUG=True
+VERBOSE=True
+```
 
 ## 🚀 Usage
 
-### Basic Analysis
+### Policy Analysis & Debate System
+
+#### Basic Analysis
 ```bash
 python main.py run policy_1
 ```
 
-### Enhanced Analysis with Dynamic Agents
+#### Enhanced Analysis with Dynamic Agents
 ```bash
 python main.py dynamic policy_1
 ```
 
-### Structured Policy Debate
+#### Structured Policy Debate
 ```bash
 python main.py debate policy_1
 ```
 *Conducts structured debates between stakeholder agents using A2A protocols*
 
-### Demo
+#### Demo
 ```bash
 python demo.py
 ```
 *Demonstrates all features including debate system*
 
-### Available Commands
+#### Available Commands
 - `run` - Basic policy analysis
 - `dynamic` - Enhanced analysis with dynamic stakeholder agents
 - `debate` - Structured debate with A2A protocols
 - `train` - Train the crew with custom data
 - `replay` - Replay specific tasks
 - `test` - Test crew performance
+
+### Policy Discovery System
+
+#### Quick Test
+```bash
+# Run the policy discovery example
+uv run python policy_discovery/example.py
+
+# Or with make
+make run-example
+```
+
+#### Development Commands
+```bash
+# View all commands
+make help
+
+# Development setup
+make dev-setup
+
+# Run tests and quality checks
+make test
+make lint
+make type-check
+make check        # Run all checks
+
+# Format code
+make format
+
+# Clean up
+make clean
+```
 
 ## 📁 Policy File Format
 
@@ -99,7 +169,7 @@ Place your policy files in the `test_data/` directory with the following JSON st
 ### 1. **Policy Discovery Agent**
 - Reads local policy files from `test_data/`
 - Extracts policy text and metadata
-- Uses Serper search for additional policy context and research
+- Uses Serper search and/or Exa API for additional policy context and research
 - Prepares content for analysis
 
 ### 2. **Stakeholder Identification**
@@ -114,7 +184,7 @@ Place your policy files in the `test_data/` directory with the following JSON st
 
 ### 4. **Research & Analysis**
 - Each stakeholder agent researches policy impacts
-- Uses Serper search for comprehensive web research
+- Uses multiple search APIs for comprehensive web research
 - Generates perspective-specific arguments
 - Stores findings in individual knowledge bases
 
@@ -155,22 +225,9 @@ Each stakeholder agent maintains its own knowledge base:
 ### API Integration
 - **Gemini API**: Advanced language understanding
 - **Serper API**: Web search and research
+- **Exa API**: Intelligent policy discovery
 - **CrewAI**: Multi-agent orchestration
 - **Web Scraping**: Additional content extraction
-
-## 🎯 Enhanced Features
-
-### 📊 **Dynamic Stakeholder Analysis**
-- AI-powered stakeholder identification using Gemini API
-- Automatic creation of specialized agents for each stakeholder perspective
-- Individual knowledge bases for research storage and retrieval
-- Structured policy impact analysis with validated JSON outputs
-
-### 🔍 **Comprehensive Research Tools**
-- **PolicyFileReader**: Reads local policy files with structured data validation
-- **StakeholderIdentifier**: Uses AI to identify affected parties and their interests
-- **StakeholderResearcher**: Conducts detailed analysis from each stakeholder's perspective
-- **KnowledgeBaseManager**: Stores and retrieves research findings with version control
 
 ### 🎭 **Structured Debate System**
 - **DebateModerator**: Unbiased agent that analyzes topics and guides discussions
@@ -178,11 +235,6 @@ Each stakeholder agent maintains its own knowledge base:
 - **ArgumentGenerator**: Creates evidence-based arguments from stakeholder perspectives
 - **A2AMessenger**: Facilitates structured Agent-to-Agent communication
 - **A2A Protocols**: Ensures proper argumentative framework and communication flow
-
-### 🌐 **Web Research Integration**
-- Powered by Serper search API for comprehensive web research
-- Scrapes relevant websites for additional policy context
-- Combines local policy analysis with current web information
 
 ## 🎯 Example: San Francisco Soft Story Retrofit
 
@@ -236,8 +288,19 @@ Enable verbose output by setting `DEBUG=True` in your `.env` file. The system wi
 You'll need to obtain API keys from:
 - **Gemini API**: Get your key from Google AI Studio
 - **Serper API**: Get your key from Serper.dev
+- **Exa API**: Get your key from Exa.ai
 
-Add both keys to your `.env` file for the system to function properly.
+Add the keys to your `.env` file for the system to function properly.
+
+## 🏗️ Project Structure
+
+- `policy_discovery/` - Core policy discovery module
+- `src/dynamic_crew/` - Dynamic debate system components
+- `pyproject.toml` - Project configuration
+- `Makefile` - Development automation
+- `uv.lock` - Dependency lock file
+- `knowledge/` - Knowledge base storage
+- `test_data/` - Sample policy documents
 
 ## 🤝 Contributing
 
@@ -248,6 +311,12 @@ This system is designed for policy analysis and civic engagement. Contributions 
 - Integration with civic databases
 - Advanced search and research capabilities
 - Additional search providers (Exa, Tavily, etc.)
+
+### Development Setup
+1. Set up development environment: `make dev-setup`
+2. Make your changes
+3. Run quality checks: `make check`
+4. Submit a pull request
 
 ## 📄 License
 
