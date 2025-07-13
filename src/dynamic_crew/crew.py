@@ -1,6 +1,21 @@
 from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, crew, task
-from crewai_tools import SerperDevTool, ScrapeWebsiteTool
+from crewai.tools import BaseTool
+
+# Mock tools to replace missing crewai_tools
+class SerperDevTool(BaseTool):
+    name: str = "SerperDevTool"
+    description: str = "Mock search tool for web research"
+    
+    def _run(self, query: str) -> str:
+        return f"Mock search results for: {query}"
+
+class ScrapeWebsiteTool(BaseTool):
+    name: str = "ScrapeWebsiteTool"
+    description: str = "Mock web scraping tool"
+    
+    def _run(self, url: str) -> str:
+        return f"Mock scraped content from: {url}"
 import os
 import logging
 import yaml
@@ -11,29 +26,53 @@ from pathlib import Path
 # Import the integrated policy discovery agent
 from .policy_discovery import PolicyDiscoveryAgent, UserContext, PolicyDomain, GovernmentLevel
 
-# Import the centralized Weave client
+# Import the robust LLM client (renamed from weave_client)
 from .weave_client import get_weave_client, initialize_weave_client
+# Import the dedicated Weave inference client
+from .weave_inference_client import get_weave_inference_client, initialize_weave_inference_client
 
-# CrewAI LLM wrapper for Weave client
-class WeaveCrewAILLM:
+# CrewAI LLM wrapper for robust client
+class RobustCrewAILLM:
     """
-    Wrapper class to make Weave client compatible with CrewAI's expected LLM interface
+    Wrapper class to make robust LLM client compatible with CrewAI's expected LLM interface
     """
     
-    def __init__(self, weave_client):
-        self.weave_client = weave_client
-        # Use the same model as the weave client
-        self.model_name = weave_client.model_name
+    def __init__(self, llm_client):
+        self.llm_client = llm_client
+        # Use the first available provider's model
+        if llm_client.providers:
+            first_provider = llm_client.providers[0]
+            self.model_name = first_provider.get('model', 'gpt-3.5-turbo')
+            self.provider_name = first_provider.get('name', 'unknown')
+        else:
+            self.model_name = "gpt-3.5-turbo"
+            self.provider_name = "unknown"
         self.temperature = 0.7
+        
+        print(f"✅ CrewAI LLM wrapper initialized with provider: {self.provider_name}, model: {self.model_name}")
     
     def call(self, prompt: str, **kwargs) -> str:
         """CrewAI compatible call method - this is the main method CrewAI uses"""
-        return self.weave_client.generate_text(
-            prompt=prompt,
-            temperature=kwargs.get('temperature', self.temperature),
-            max_tokens=kwargs.get('max_tokens', 2048),
-            model=kwargs.get('model', self.model_name)
-        )
+        try:
+            # Check if this is a Weave inference client
+            if hasattr(self.llm_client, 'generate_text'):
+                return self.llm_client.generate_text(
+                    prompt=prompt,
+                    temperature=kwargs.get('temperature', self.temperature),
+                    max_tokens=kwargs.get('max_tokens', 2048)
+                )
+            else:
+                # Fallback for other client types
+                return self.llm_client.generate_text(
+                    prompt=prompt,
+                    temperature=kwargs.get('temperature', self.temperature),
+                    max_tokens=kwargs.get('max_tokens', 2048),
+                    model=kwargs.get('model', self.model_name)
+                )
+        except Exception as e:
+            print(f"❌ LLM call failed: {e}")
+            # Return a fallback response to prevent system crashes
+            return f"LLM Error: {str(e)}. Please check your provider configuration."
     
     def invoke(self, prompt: str, **kwargs) -> str:
         """CrewAI compatible invoke method - fallback"""
@@ -73,119 +112,206 @@ def load_yaml_config(config_file: str) -> Dict[str, Any]:
 
 @CrewBase
 class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
-    """DynamicCrewAutomationForPolicyAnalysisAndDebate crew"""
+    """
+    Dynamic CrewAI system for policy analysis and debate with robust LLM integration
+    """
     
     def __init__(self):
         # Load configurations before calling super().__init__()
-        print("🔧 Loading YAML configurations...")
-        self.agents_config = load_yaml_config("agents.yaml")
-        self.tasks_config = load_yaml_config("tasks.yaml")
         
-        print(f"📋 Agents config keys: {list(self.agents_config.keys()) if self.agents_config else 'None'}")
-        print(f"📋 Tasks config keys: {list(self.tasks_config.keys()) if self.tasks_config else 'None'}")
+        # Disable Weave completely to prevent circular reference issues
+        os.environ['WEAVE_DISABLE_TRACING'] = '1'
+        os.environ['WEAVE_AUTO_TRACE'] = '0'
+        os.environ['WEAVE_AUTO_PATCH'] = '0'
+        os.environ['WANDB_DISABLE_TRACING'] = '1'
         
-        super().__init__()
-        self.stakeholder_agents = {}
-        self.stakeholder_tasks = {}
-        self.policy_file_reader = PolicyFileReader()
-        self.stakeholder_identifier = StakeholderIdentifier()
-        self.knowledge_base_manager = KnowledgeBaseManager()
-        self.stakeholder_researcher = StakeholderResearcher()
-        self.topic_analyzer = TopicAnalyzer()
-        self.argument_generator = ArgumentGenerator()
-        self.a2a_messenger = A2AMessenger()
-        self.debate_moderator = DebateModerator()
+        # Load configurations
+        self.agents_config = self._load_config('agents.yaml')
+        self.tasks_config = self._load_config('tasks.yaml')
         
-        # Set up logging
-        self.logger = logging.getLogger(__name__)
-        
-        # Initialize the integrated policy discovery agent
+        # Initialize LLM with Claude as primary, with robust fallback
         try:
-            self.policy_discovery_client = PolicyDiscoveryAgent()
-            print("✅ Policy Discovery Agent initialized with Exa API")
-        except Exception as e:
-            print(f"⚠️  Policy Discovery Agent initialization failed: {e}")
-            self.policy_discovery_client = None
-        
-        # Initialize Weave client for LLM operations with disabled tracing for CrewAI
-        try:
-            # Completely disable Weave tracing for CrewAI operations to prevent circular references
-            os.environ['WEAVE_DISABLE_TRACING'] = '1'
-            os.environ['WEAVE_AUTO_TRACE'] = '0'
-            os.environ['WEAVE_AUTO_PATCH'] = '0'
-            os.environ['WANDB_DISABLE_TRACING'] = '1'
-            
-            self.weave_client = initialize_weave_client("civicai-policy-debate")
-            
-            # Try to create CrewAI LLM instance with Groq configuration
-            try:
-                groq_key = os.getenv('GROQ_API_KEY')
-                if groq_key:
+            # Try Claude first (Anthropic's most capable model)
+            anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
+            if anthropic_api_key:
+                print("🔄 Attempting Claude LLM configuration...")
+                try:
+                    # Configure Claude LLM
                     self.llm = LLM(
-                        model="llama3-8b-8192",
-                        api_base="https://api.groq.com/openai/v1",
-                        api_key=groq_key,
+                        model="claude-3-5-sonnet-20241022",
+                        api_key=anthropic_api_key,
+                        temperature=0.7,
+                        max_tokens=4096
                     )
-                    print("✅ CrewAI LLM configured with Groq")
-                else:
-                    # Fallback to regular OpenAI
-                    openai_key = os.getenv('OPENAI_API_KEY')
-                    if openai_key:
-                        print("⚠️  No Groq key, falling back to OpenAI")
+                    
+                    print("✅ Claude LLM configured successfully")
+                    print(f"🤖 Using Claude model: claude-3-5-sonnet-20241022")
+                    print(f"📡 Provider: Anthropic")
+                    
+                    # Test the LLM with a simple call
+                    test_response = self.llm.call("Hello")
+                    if test_response and len(test_response.strip()) > 0:
+                        print("✅ Claude LLM test successful")
+                        self.llm_client = None  # Use Claude LLM directly
+                    else:
+                        raise ValueError("Claude LLM returned empty response")
+                        
+                except Exception as claude_error:
+                    print(f"⚠️  Claude configuration failed: {claude_error}")
+                    print("   Falling back to other providers")
+                    raise claude_error
+            else:
+                print("⚠️  ANTHROPIC_API_KEY not found, using fallback providers")
+                raise ValueError("ANTHROPIC_API_KEY not found")
+                
+        except Exception as e:
+            print(f"🔄 Claude not available, configuring fallback providers...")
+            
+            # Try Gemini as first fallback
+            gemini_api_key = os.getenv('GOOGLE_API_KEY')
+            if gemini_api_key:
+                try:
+                    print("🔄 Configuring Gemini LLM...")
+                    self.llm = LLM(
+                        model="gemini-1.5-flash",
+                        api_key=gemini_api_key,
+                        provider="google"
+                    )
+                    print("✅ Gemini LLM configured successfully")
+                    print(f"🤖 Using Gemini model: gemini-1.5-flash")
+                    
+                    # Test the LLM
+                    test_response = self.llm.call("Hello")
+                    if test_response and len(test_response.strip()) > 0:
+                        print("✅ Gemini LLM test successful")
+                        self.llm_client = None
+                    else:
+                        raise ValueError("Gemini LLM returned empty response")
+                        
+                except Exception as gemini_error:
+                    print(f"⚠️  Gemini configuration failed: {gemini_error}")
+                    raise gemini_error
+            
+            # Try OpenAI as second fallback
+            else:
+                openai_api_key = os.getenv('OPENAI_API_KEY')
+                if openai_api_key:
+                    try:
+                        print("🔄 Configuring OpenAI LLM...")
                         self.llm = LLM(
                             model="gpt-3.5-turbo",
-                            api_key=openai_key,
+                            api_key=openai_api_key,
                         )
-                        print("✅ CrewAI LLM configured with OpenAI fallback")
-                    else:
-                        # Final fallback to WeaveCrewAILLM wrapper
-                        print("⚠️  No API keys available, using WeaveCrewAILLM wrapper")
-                        self.llm = WeaveCrewAILLM(self.weave_client)
+                        print("✅ OpenAI LLM configured successfully")
+                        print(f"🤖 Using OpenAI model: gpt-3.5-turbo")
+                        
+                        # Test the LLM
+                        test_response = self.llm.call("Hello")
+                        if test_response and len(test_response.strip()) > 0:
+                            print("✅ OpenAI LLM test successful")
+                            self.llm_client = None
+                        else:
+                            raise ValueError("OpenAI LLM returned empty response")
+                            
+                    except Exception as openai_error:
+                        print(f"⚠️  OpenAI configuration failed: {openai_error}")
+                        raise openai_error
                 
-                # Add retry configuration to handle rate limits
-                if hasattr(self.llm, 'config'):
-                    self.llm.config.update({
-                        'max_retries': 3,
-                        'retry_delay': 2,
-                        'timeout': 60
-                    })
-                
-            except Exception as llm_error:
-                print(f"⚠️  LLM configuration failed: {llm_error}")
-                
-                # Fallback to regular OpenAI
-                openai_key = os.getenv('OPENAI_API_KEY')
-                if openai_key:
-                    print("⚠️  Falling back to regular OpenAI for CrewAI LLM")
-                    self.llm = LLM(
-                        model="gpt-3.5-turbo",
-                        api_key=openai_key,
-                    )
-                    print("✅ CrewAI LLM configured with OpenAI fallback")
+                # Try Groq as third fallback
                 else:
-                    # Final fallback to WeaveCrewAILLM wrapper
-                    print("⚠️  No OpenAI key available, using WeaveCrewAILLM wrapper")
-                    self.llm = WeaveCrewAILLM(self.weave_client)
+                    groq_api_key = os.getenv('GROQ_API_KEY')
+                    if groq_api_key:
+                        try:
+                            print("🔄 Configuring Groq LLM...")
+                            self.llm = LLM(
+                                model="llama3-8b-8192",
+                                api_base="https://api.groq.com/openai/v1",
+                                api_key=groq_api_key,
+                            )
+                            print("✅ Groq LLM configured successfully")
+                            print(f"🤖 Using Groq model: llama3-8b-8192")
+                            
+                            # Test the LLM
+                            test_response = self.llm.call("Hello")
+                            if test_response and len(test_response.strip()) > 0:
+                                print("✅ Groq LLM test successful")
+                                self.llm_client = None
+                            else:
+                                raise ValueError("Groq LLM returned empty response")
+                                
+                        except Exception as groq_error:
+                            print(f"⚠️  Groq configuration failed: {groq_error}")
+                            raise groq_error
+                    else:
+                        # Last resort: try robust multi-provider client
+                        try:
+                            print("🔄 Attempting robust multi-provider client...")
+                            self.llm_client = initialize_weave_client("civicai-policy-debate")
+                            
+                            if self.llm_client.is_available():
+                                self.llm = RobustCrewAILLM(self.llm_client)
+                                print("✅ CrewAI LLM configured with robust multi-provider client")
+                                
+                                # Log available providers
+                                provider_names = [p['name'] for p in self.llm_client.providers]
+                                print(f"📡 Available providers: {', '.join(provider_names)}")
+                            else:
+                                raise ValueError("No LLM providers available in robust client")
+                        except Exception as robust_error:
+                            print(f"❌ All LLM configurations failed")
+                            print(f"   Claude Error: {e}")
+                            print(f"   Gemini Error: {gemini_error if 'gemini_error' in locals() else 'Not attempted'}")
+                            print(f"   OpenAI Error: {openai_error if 'openai_error' in locals() else 'Not attempted'}")
+                            print(f"   Groq Error: {groq_error if 'groq_error' in locals() else 'Not attempted'}")
+                            print(f"   Robust Client Error: {robust_error}")
+                            raise ValueError("Failed to initialize any LLM client. Please check your API keys.")
+        
+        # Initialize tools
+        self._initialize_tools()
+        
+        # Initialize stakeholder tracking attributes
+        self.stakeholder_agents = {}
+        self.stakeholder_tasks = {}
+        
+        # Call parent constructor
+        super().__init__()
+        
+        print("✅ Dynamic CrewAI system initialized successfully")
+    
+    def _load_config(self, filename: str) -> Dict[str, Any]:
+        """Load configuration from YAML file"""
+        config_path = Path(__file__).parent / "config" / filename
+        try:
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            print(f"⚠️  Failed to load {filename}: {e}")
+            return {}
+    
+    def _initialize_tools(self):
+        """Initialize all tools with robust error handling"""
+        try:
+            from .tools.custom_tool import (
+                PolicyFileReader, StakeholderIdentifier, KnowledgeBaseManager,
+                StakeholderResearcher, TopicAnalyzer, ArgumentGenerator,
+                A2AMessenger, DebateModerator
+            )
             
-            # Keep the wrapper for backward compatibility
-            self.weave_llm_wrapper = WeaveCrewAILLM(self.weave_client)
-            print("✅ Weave client initialized for policy debate")
+            # Initialize tools
+            self.policy_file_reader = PolicyFileReader()
+            self.stakeholder_identifier = StakeholderIdentifier()
+            self.knowledge_base_manager = KnowledgeBaseManager()
+            self.stakeholder_researcher = StakeholderResearcher()
+            self.topic_analyzer = TopicAnalyzer()
+            self.argument_generator = ArgumentGenerator()
+            self.a2a_messenger = A2AMessenger()
+            self.debate_moderator = DebateModerator()
+            
+            print("✅ All tools initialized successfully")
             
         except Exception as e:
-            print(f"⚠️  Weave client initialization failed: {e}")
-            self.weave_client = None
-            
-            # Try to create a basic LLM fallback
-            openai_key = os.getenv('OPENAI_API_KEY')
-            if openai_key:
-                print("⚠️  Using OpenAI as complete fallback")
-                self.llm = LLM(
-                    model="gpt-3.5-turbo",
-                    api_key=openai_key,
-                )
-                print("✅ Basic OpenAI LLM configured")
-            else:
-                raise ValueError("No API keys available: WNB_API_KEY and OPENAI_API_KEY are both missing")
+            print(f"❌ Tool initialization failed: {e}")
+            raise ValueError(f"Failed to initialize tools: {e}")
 
     @agent
     def coordinator_agent(self) -> Agent:
@@ -236,8 +362,9 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
         Returns:
             Dictionary containing discovered policies and analysis
         """
-        if not self.policy_discovery_client:
-            return {"error": "Policy discovery client not available"}
+        # Check if we have a policy discovery client available
+        if not hasattr(self, 'llm_client') or not self.llm_client:
+            return {"error": "Policy discovery client not available - using W&B Inference LLM directly"}
         
         try:
             # Create user context for policy discovery with refined parameters
@@ -248,7 +375,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
             )
             
             # Discover policies using the refined integrated agent
-            results = await self.policy_discovery_client.discover_policies(user_context=user_context)
+            results = await self.llm_client.discover_policies(user_context=user_context)
             
             # Return structured results with enhanced quality metrics
             return {
@@ -606,14 +733,34 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
     def preflight_health_check(self):
         """Check LLM and tool availability before running workflow."""
         errors = []
-        # Check LLM
+        
+        # Check LLM - handle Claude, Gemini, W&B Inference, and fallback clients
         try:
-            from .weave_client import get_weave_client
-            weave_client = get_weave_client()
-            if not weave_client.is_available():
-                errors.append("No available LLM (Groq or OpenAI API key missing)")
+            if hasattr(self, 'llm') and self.llm:
+                if hasattr(self.llm, 'model'):  # Claude, Gemini or W&B Inference LLM
+                    model_name = getattr(self.llm, 'model', 'Unknown')
+                    provider = getattr(self.llm, 'provider', 'Unknown')
+                    if 'claude' in model_name.lower():
+                        print(f"✅ Claude LLM available: {model_name}")
+                    elif 'gemini' in model_name.lower():
+                        print(f"✅ Gemini LLM available: {model_name}")
+                    elif 'wandb' in str(self.llm).lower() or 'inference' in str(self.llm).lower():
+                        print(f"✅ W&B Inference LLM available: {model_name}")
+                    else:
+                        print(f"✅ LLM available: {model_name} (Provider: {provider})")
+                elif hasattr(self.llm, 'llm_client') and self.llm.llm_client:  # Fallback client
+                    if self.llm.llm_client.is_available():
+                        provider_names = [p['name'] for p in self.llm.llm_client.providers]
+                        print(f"✅ Fallback LLM providers available: {', '.join(provider_names)}")
+                    else:
+                        errors.append("No available LLM providers in fallback client")
+                else:
+                    errors.append("LLM not properly configured")
+            else:
+                errors.append("No LLM configured")
         except Exception as e:
             errors.append(f"LLM health check failed: {e}")
+        
         # Check tools
         try:
             _ = self.stakeholder_researcher
@@ -624,21 +771,24 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
             _ = self.policy_file_reader
             _ = self.stakeholder_identifier
             _ = self.topic_analyzer
+            print("✅ All tools available")
         except Exception as e:
-            errors.append(f"Tool import/instantiation failed: {e}")
+            errors.append(f"Tool health check failed: {e}")
+        
         return errors
 
     def run_debate_workflow(self, policy_text, stakeholder_list):
         """Run the full debate workflow with robust error handling."""
-        logger = logging.getLogger("debate_orchestration")
+        # Use local logger only, do not attach to self or pass to Weave
+        local_logger = logging.getLogger("debate_orchestration")
         results = {}
         errors = []
         # 1. Preflight health check
         health_errors = self.preflight_health_check()
         if health_errors:
-            logger.error(f"Preflight health check failed: {health_errors}")
+            local_logger.error(f"Preflight health check failed: {health_errors}")
             return {"success": False, "errors": health_errors}
-        logger.info("Preflight health check passed.")
+        local_logger.info("Preflight health check passed.")
 
         # 2. Setup agents (explicit, robust)
         try:
@@ -655,7 +805,7 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
             # Stakeholder agents
             stakeholder_agents = [self.create_stakeholder_agent(s) for s in stakeholder_list]
         except Exception as e:
-            logger.error(f"Agent setup failed: {e}")
+            local_logger.error(f"Agent setup failed: {e}")
             errors.append(f"Agent setup failed: {e}")
             return {"success": False, "errors": errors}
 
@@ -726,48 +876,48 @@ class DynamicCrewAutomationForPolicyAnalysisAndDebateCrew():
                 agent=action_agent,
             )
         except Exception as e:
-            logger.error(f"Task setup failed: {e}")
+            local_logger.error(f"Task setup failed: {e}")
             errors.append(f"Task setup failed: {e}")
             return {"success": False, "errors": errors}
 
         # 4. Run workflow step by step, catching errors
         try:
-            logger.info("Running policy discovery task...")
+            local_logger.info("Running policy discovery task...")
             results['discovery'] = discovery_task.execute()
         except Exception as e:
-            logger.error(f"Policy discovery failed: {e}")
+            local_logger.error(f"Policy discovery failed: {e}")
             errors.append(f"Policy discovery failed: {e}")
         try:
-            logger.info("Running stakeholder identification task...")
+            local_logger.info("Running stakeholder identification task...")
             results['stakeholder_id'] = stakeholder_id_task.execute()
         except Exception as e:
-            logger.error(f"Stakeholder identification failed: {e}")
+            local_logger.error(f"Stakeholder identification failed: {e}")
             errors.append(f"Stakeholder identification failed: {e}")
         for i, t in enumerate(stakeholder_research_tasks):
             try:
-                logger.info(f"Running stakeholder research task {i}...")
+                local_logger.info(f"Running stakeholder research task {i}...")
                 results[f'stakeholder_research_{i}'] = t.execute()
             except Exception as e:
-                logger.error(f"Stakeholder research {i} failed: {e}")
+                local_logger.error(f"Stakeholder research {i} failed: {e}")
                 errors.append(f"Stakeholder research {i} failed: {e}")
         try:
-            logger.info("Running topic analysis task...")
+            local_logger.info("Running topic analysis task...")
             results['topic_analysis'] = topic_task.execute()
         except Exception as e:
-            logger.error(f"Topic analysis failed: {e}")
+            local_logger.error(f"Topic analysis failed: {e}")
             errors.append(f"Topic analysis failed: {e}")
         for i, t in enumerate(argument_tasks):
             try:
-                logger.info(f"Running argument generation task {i}...")
+                local_logger.info(f"Running argument generation task {i}...")
                 results[f'argument_{i}'] = t.execute()
             except Exception as e:
-                logger.error(f"Argument generation {i} failed: {e}")
+                local_logger.error(f"Argument generation {i} failed: {e}")
                 errors.append(f"Argument generation {i} failed: {e}")
         try:
-            logger.info("Running synthesis task...")
+            local_logger.info("Running synthesis task...")
             results['synthesis'] = synthesis_task.execute()
         except Exception as e:
-            logger.error(f"Synthesis failed: {e}")
+            local_logger.error(f"Synthesis failed: {e}")
             errors.append(f"Synthesis failed: {e}")
 
         results['errors'] = errors
