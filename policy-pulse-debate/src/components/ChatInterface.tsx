@@ -469,6 +469,36 @@ const ChatInterface: React.FC = () => {
         setIsDebateConnected(false);
       });
 
+      client.onMessage('debate_terminated_complete', (message: any) => {
+        addBotMessage(`🛑 **Debate Ended Early**\n\n${message.message}`, { type: 'debate_terminated' });
+        
+        const actions: ChatAction[] = [
+          {
+            id: 'generate_email_after_debate',
+            label: 'Generate Email',
+            type: 'generate_email',
+            data: { policy, debateMessages }
+          }
+        ];
+
+        addBotMessage(
+          "You can still generate your personalized email based on the discussion so far.",
+          { debateResult: { success: true, debate_messages: debateMessages }, debateMessages },
+          actions
+        );
+        
+        setIsDebateActive(false);
+        setIsDebateConnected(false);
+      });
+
+      client.onMessage('user_input_received', (message: any) => {
+        addBotMessage(`👤 ${message.message}`, { type: 'user_input_response' });
+      });
+
+      client.onMessage('debate_terminating', (message: any) => {
+        addBotMessage(`🛑 ${message.message}`, { type: 'debate_terminating' });
+      });
+
       client.onMessage('error', (message: any) => {
         addBotMessage(`❌ Error: ${message.message}`, { type: 'error' });
         toast({
@@ -504,6 +534,43 @@ const ChatInterface: React.FC = () => {
       
       addBotMessage("Generating advocacy email...");
       
+      // Use the enhanced debate-based email generation if we have a debate session
+      if (currentDebateSession) {
+        try {
+          const response = await fetch(`http://localhost:8000/debates/${currentDebateSession}/email/generate`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              user_perspective: 'concerned_citizen',
+              user_name: '[Your Name]',
+              user_address: '[Your Address]',
+              user_contact: '[Your Contact Information]',
+              focus_areas: []
+            })
+          });
+
+          if (response.ok) {
+            const emailData = await response.json();
+            addBotMessage(
+              "Your enhanced advocacy email is ready (based on the comprehensive debate discussion):",
+              { 
+                type: 'email_generated',
+                emailContent: emailData.email_content,
+                recipients: emailData.recipients,
+                policy: policy
+              }
+            );
+            return;
+          }
+        } catch (error) {
+          console.error('Error with enhanced email generation:', error);
+          // Fall back to standard email generation
+        }
+      }
+      
+      // Fallback to standard email generation
       const emailRequest: EmailGenerationRequest = {
         policy_id: policy.url, // Send the URL so backend can fetch full content
         policy_title: policy.title,
@@ -598,7 +665,11 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
 
     // If we're in an active debate, send message to the debate
     if (isDebateActive && isDebateConnected && wsClient) {
-      wsClient.sendUserMessage(userInput);
+      wsClient.sendMessage({
+        type: 'user_input',
+        message: userInput,
+        timestamp: new Date().toISOString()
+      });
       addBotMessage(`**You**: ${userInput}`, { type: 'user_debate_message' });
       return;
     }

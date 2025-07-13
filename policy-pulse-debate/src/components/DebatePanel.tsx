@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Users, MessageSquare, Play, Pause, SkipForward, RotateCcw, Loader2, AlertCircle } from 'lucide-react';
+import { Send, Users, MessageSquare, Play, Pause, SkipForward, RotateCcw, Loader2, AlertCircle, StopCircle, CheckCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,6 +26,10 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
   const [error, setError] = useState<string | null>(null);
   const [wsClient, setWsClient] = useState<DebateWebSocketClient | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  // Add state for early ending functionality
+  const [showEndConfirmation, setShowEndConfirmation] = useState(false);
+  const [endReason, setEndReason] = useState('');
+  const [canEndDebate, setCanEndDebate] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
@@ -79,6 +83,7 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
       // Set up WebSocket event handlers
       client.onMessage('connection_established', (message) => {
         setIsConnected(true);
+        setCanEndDebate(true);
         toast({
           title: "Connected to debate",
           description: "Real-time debate connection established",
@@ -144,7 +149,75 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
         };
         setMessages(prev => [...prev, endMessage]);
         setDebateStatus('completed');
+        setCanEndDebate(false);
         onGenerateEmail();
+      });
+
+      client.onMessage('debate_terminated_complete', (message) => {
+        const terminatedMessage: DebateMessage = {
+          id: `terminated_${Date.now()}`,
+          sender: 'moderator',
+          content: `🛑 **Debate Ended Early**\n\n${message.message}\n\nYou can still generate your personalized email based on the discussion so far.`,
+          timestamp: new Date().toISOString(),
+          message_type: 'status'
+        };
+        setMessages(prev => [...prev, terminatedMessage]);
+        setDebateStatus('terminated_early');
+        setCanEndDebate(false);
+        onGenerateEmail();
+      });
+
+      client.onMessage('end_debate_confirmation', (message) => {
+        setShowEndConfirmation(true);
+        toast({
+          title: "Confirm debate ending",
+          description: "Are you sure you want to end the debate early?",
+        });
+      });
+
+      client.onMessage('debate_terminating', (message) => {
+        setShowEndConfirmation(false);
+        setCanEndDebate(false);
+        const terminatingMessage: DebateMessage = {
+          id: `terminating_${Date.now()}`,
+          sender: 'moderator',
+          content: `🛑 ${message.message}`,
+          timestamp: new Date().toISOString(),
+          message_type: 'status'
+        };
+        setMessages(prev => [...prev, terminatingMessage]);
+        toast({
+          title: "Debate ending",
+          description: message.message,
+        });
+      });
+
+      client.onMessage('end_debate_cancelled', (message) => {
+        setShowEndConfirmation(false);
+        toast({
+          title: "Debate continues",
+          description: message.message,
+        });
+      });
+
+      client.onMessage('user_input_received', (message) => {
+        const userMessage: DebateMessage = {
+          id: `user_input_${Date.now()}`,
+          sender: 'user',
+          content: userInput,
+          timestamp: new Date().toISOString(),
+          message_type: 'user_input'
+        };
+        setMessages(prev => [...prev, userMessage]);
+        
+        const responseMessage: DebateMessage = {
+          id: `response_${Date.now()}`,
+          sender: 'moderator',
+          content: `👤 ${message.message}`,
+          timestamp: new Date().toISOString(),
+          message_type: 'status'
+        };
+        setMessages(prev => [...prev, responseMessage]);
       });
 
       client.onMessage('error', (message) => {
@@ -191,8 +264,49 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
   const handleUserMessage = () => {
     if (!userInput.trim() || !wsClient || !isConnected) return;
 
-    wsClient.sendUserMessage(userInput);
+    // Send as user_input for pivot functionality
+    wsClient.sendMessage({
+      type: 'user_input',
+      message: userInput,
+      timestamp: new Date().toISOString()
+    });
+    
     setUserInput('');
+  };
+
+  const handleEndDebate = () => {
+    if (!wsClient || !isConnected) return;
+    
+    wsClient.sendMessage({
+      type: 'end_debate',
+      confirmation: false,
+      timestamp: new Date().toISOString()
+    });
+  };
+
+  const handleEndDebateConfirm = () => {
+    if (!wsClient || !isConnected) return;
+    
+    wsClient.sendMessage({
+      type: 'end_debate_confirm',
+      reason: endReason || 'User requested early termination',
+      timestamp: new Date().toISOString()
+    });
+    
+    setShowEndConfirmation(false);
+    setEndReason('');
+  };
+
+  const handleEndDebateCancel = () => {
+    if (!wsClient || !isConnected) return;
+    
+    wsClient.sendMessage({
+      type: 'end_debate_cancel',
+      timestamp: new Date().toISOString()
+    });
+    
+    setShowEndConfirmation(false);
+    setEndReason('');
   };
 
   const pauseDebate = () => {
@@ -215,6 +329,8 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
     setMessages([]);
     setDebateStatus('idle');
     setIsConnected(false);
+    setCanEndDebate(false);
+    setShowEndConfirmation(false);
     startDebate();
   };
 
@@ -229,6 +345,7 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
       case 'running': return 'Debate in progress';
       case 'paused': return 'Debate paused';
       case 'completed': return 'Debate completed';
+      case 'terminated_early': return 'Debate ended early';
       default: return debateStatus;
     }
   };
@@ -267,61 +384,79 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="p-4 border-b bg-green-50">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xl font-bold text-gray-800">Policy Debate</h2>
-          <div className="flex items-center gap-2">
-            <Select
-              value={systemType}
-              onValueChange={(value: 'debug' | 'weave' | 'human') => setSystemType(value)}
-              disabled={loading || isConnected}
-            >
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="debug">Debug</SelectItem>
-                <SelectItem value="weave">Weave</SelectItem>
-                <SelectItem value="human">Human</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <p className="text-sm text-gray-600 mb-2">
-          {selectedPolicy.title}
-        </p>
-        
-        {/* Status and Controls */}
+      <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Users className="w-5 h-5" />
+            Policy Debate
+          </CardTitle>
           <div className="flex items-center gap-2">
             <Badge variant={isConnected ? "default" : "secondary"}>
-              {isConnected ? "Connected" : "Disconnected"}
+              {getStatusText()}
             </Badge>
-            <span className="text-sm text-gray-600">{getStatusText()}</span>
-          </div>
-          
-          <div className="flex items-center gap-1">
-            {isConnected && debateStatus === 'paused' && (
-              <Button onClick={resumeDebate} size="sm" variant="outline">
-                <Play className="w-4 h-4 mr-1" />
-                Resume
+            {canEndDebate && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleEndDebate}
+                disabled={!isConnected}
+              >
+                <StopCircle className="w-4 h-4 mr-1" />
+                End Debate
               </Button>
             )}
-            {isConnected && debateStatus === 'running' && (
-              <Button onClick={pauseDebate} size="sm" variant="outline">
-                <Pause className="w-4 h-4 mr-1" />
-                Pause
-              </Button>
-            )}
-            <Button onClick={restartDebate} size="sm" variant="outline">
-              <RotateCcw className="w-4 h-4 mr-1" />
-              Restart
-            </Button>
           </div>
         </div>
-      </div>
+        
+        {selectedPolicy && (
+          <div className="text-sm text-gray-600">
+            Discussing: <span className="font-medium">{selectedPolicy.title}</span>
+          </div>
+        )}
+      </CardHeader>
+
+      {/* Early End Confirmation Dialog */}
+      {showEndConfirmation && (
+        <div className="p-4 border-b bg-yellow-50">
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              <div className="space-y-3">
+                <p className="font-medium">Are you sure you want to end the debate early?</p>
+                <p className="text-sm">This will generate a summary of the discussion so far.</p>
+                <div className="space-y-2">
+                  <Input
+                    placeholder="Optional: Reason for ending early"
+                    value={endReason}
+                    onChange={(e) => setEndReason(e.target.value)}
+                    className="w-full"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleEndDebateConfirm}
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      Yes, End Debate
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleEndDebateCancel}
+                    >
+                      <X className="w-4 h-4 mr-1" />
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -367,6 +502,11 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
                     R{message.round}
                   </Badge>
                 )}
+                {message.message_type === 'user_input' && (
+                  <Badge variant="outline" className="text-xs px-1 bg-blue-50">
+                    Input
+                  </Badge>
+                )}
               </div>
               
               <div className={`rounded-lg p-3 ${
@@ -402,7 +542,7 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
             placeholder={
               !isConnected 
                 ? "Connecting to debate..." 
-                : "Type your message to join the debate..."
+                : "Type your message to influence the debate direction..."
             }
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
@@ -426,6 +566,11 @@ const DebatePanel: React.FC<DebatePanelProps> = ({ selectedPolicy, onGenerateEma
         {!isConnected && (
           <p className="text-xs text-gray-500 mt-2">
             Connect to the debate to participate in the discussion
+          </p>
+        )}
+        {isConnected && (
+          <p className="text-xs text-gray-500 mt-2">
+            💬 Your input can change the debate direction and focus
           </p>
         )}
       </div>
