@@ -1,0 +1,30 @@
+{
+  "session_id": "demo_6d6d76ff",
+  "policy_name": "Seismic Retrofit Policy",
+  "moderator": "Policy Debate Moderator",
+  "participants": [
+    "Property Owners",
+    "City Officials"
+  ],
+  "topics": [
+    {
+      "topic_id": "implementation_timeline",
+      "title": "Implementation Timeline",
+      "description": "Discussion about the feasibility of the 7-year implementation timeline",
+      "priority": 8,
+      "stakeholders_involved": [
+        "Property Owners",
+        "City Officials"
+      ],
+      "key_questions": [
+        "Is the timeline realistic?",
+        "What support is needed?"
+      ]
+    }
+  ],
+  "rounds": [],
+  "start_time": "2025-07-12T16:24:15.556334",
+  "end_time": "2025-07-12T16:24:15.557069",
+  "status": "completed",
+  "summary": ""
+}

@@ -1,0 +1,13 @@
+{
+  "message_id": "msg_60c01ee5",
+  "sender": "Tenants",
+  "receiver": "Landlords",
+  "message_type": "argument",
+  "content": "I must respectfully disagree with your position for these reasons.",
+  "context": {
+    "topic": "Effectiveness and Economic Impact of Rent Control Caps",
+    "round": 2
+  },
+  "timestamp": "2025-07-12T17:02:03.206478",
+  "requires_response": true
+}

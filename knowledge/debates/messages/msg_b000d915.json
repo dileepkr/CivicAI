@@ -1,0 +1,13 @@
+{
+  "message_id": "msg_b000d915",
+  "sender": "Tenants",
+  "receiver": "Landlords",
+  "message_type": "argument",
+  "content": "My position on this policy is clear based on our stakeholder interests.",
+  "context": {
+    "topic": "Effectiveness and Economic Impact of Rent Control Caps",
+    "round": 1
+  },
+  "timestamp": "2025-07-12T17:01:47.381086",
+  "requires_response": true
+}

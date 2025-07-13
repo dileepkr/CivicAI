@@ -1,0 +1,308 @@
+#!/usr/bin/env python
+"""
+Debug Real-Time Policy Debate System
+Shows live agent interactions without complex logging that causes hangs
+"""
+
+import os
+import json
+import time
+from datetime import datetime
+from dotenv import load_dotenv
+from src.dynamic_crew.tools.custom_tool import (
+    PolicyFileReader,
+    StakeholderIdentifier,
+    KnowledgeBaseManager,
+    StakeholderResearcher,
+    TopicAnalyzer,
+    ArgumentGenerator,
+    A2AMessenger,
+    DebateModerator
+)
+
+# Load environment variables
+load_dotenv()
+
+class RealTimeDebateSystem:
+    def __init__(self):
+        self.policy_reader = PolicyFileReader()
+        self.stakeholder_identifier = StakeholderIdentifier()
+        self.kb_manager = KnowledgeBaseManager()
+        self.researcher = StakeholderResearcher()
+        self.topic_analyzer = TopicAnalyzer()
+        self.argument_generator = ArgumentGenerator()
+        self.a2a_messenger = A2AMessenger()
+        self.debate_moderator = DebateModerator()
+        
+        # Check API keys
+        self.gemini_key = os.getenv('GEMINI_API_KEY')
+        self.serper_key = os.getenv('SERPER_API_KEY')
+        
+        if not self.gemini_key:
+            raise ValueError("❌ GEMINI_API_KEY not found in environment variables")
+        if not self.serper_key:
+            raise ValueError("❌ SERPER_API_KEY not found in environment variables")
+    
+    def log_step(self, step, message, status="🔄"):
+        """Log each step with timestamp"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"\n[{timestamp}] {status} {step}: {message}")
+    
+    def log_agent_action(self, agent_name, action, details=""):
+        """Log individual agent actions"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] 🤖 {agent_name}: {action}")
+        if details:
+            print(f"    💬 {details}")
+    
+    def run_debate(self, policy_name="policy_2"):
+        """Run a real-time debate without complex crew orchestration"""
+        
+        print("🎭 REAL-TIME POLICY DEBATE SYSTEM")
+        print("=" * 50)
+        
+        try:
+            # Step 1: Read Policy
+            self.log_step("STEP 1", "Reading policy file...", "📖")
+            policy_data = self.policy_reader._run(f"{policy_name}.json")
+            
+            if policy_data.startswith("Error"):
+                print(f"❌ {policy_data}")
+                return
+            
+            policy_info = json.loads(policy_data)
+            policy_text = policy_info.get("text", "")
+            policy_title = policy_info.get("title", "Unknown Policy")
+            
+            self.log_step("STEP 1", f"✅ Policy loaded: {policy_title}", "✅")
+            
+            # Step 2: Identify Stakeholders
+            self.log_step("STEP 2", "Identifying stakeholders...", "🔍")
+            stakeholder_result = self.stakeholder_identifier._run(policy_text)
+            
+            if stakeholder_result.startswith("Error"):
+                print(f"❌ {stakeholder_result}")
+                return
+            
+            stakeholder_data = json.loads(stakeholder_result)
+            stakeholders = stakeholder_data.get('stakeholders', [])
+            
+            self.log_step("STEP 2", f"✅ Found {len(stakeholders)} stakeholders", "✅")
+            
+            # Show stakeholders
+            print("\n👥 DEBATE PARTICIPANTS:")
+            for i, stakeholder in enumerate(stakeholders, 1):
+                name = stakeholder.get('name', 'Unknown')
+                stance = stakeholder.get('likely_stance', 'unknown')
+                print(f"   {i}. {name} (Initial stance: {stance})")
+            
+            # Step 3: Research Phase
+            self.log_step("STEP 3", "Stakeholder research phase...", "🔬")
+            
+            stakeholder_research = {}
+            for stakeholder in stakeholders:
+                name = stakeholder.get('name', 'Unknown')
+                self.log_agent_action(f"{name} Research Agent", "Conducting policy analysis...")
+                
+                research_result = self.researcher._run(json.dumps(stakeholder), policy_text)
+                
+                if not research_result.startswith("Error"):
+                    stakeholder_research[name] = json.loads(research_result)
+                    
+                    # Store in knowledge base
+                    kb_result = self.kb_manager._run(name, research_result, "create")
+                    self.log_agent_action(f"{name} Research Agent", f"✅ Analysis complete", kb_result)
+                else:
+                    self.log_agent_action(f"{name} Research Agent", f"❌ Research failed", research_result)
+            
+            # Step 4: Topic Analysis
+            self.log_step("STEP 4", "Analyzing debate topics...", "📋")
+            self.log_agent_action("Topic Analyzer", "Identifying key debate areas...")
+            
+            topic_result = self.topic_analyzer._run(policy_text, json.dumps(stakeholder_data))
+            
+            if not topic_result.startswith("Error"):
+                topics_data = json.loads(topic_result)
+                topics = topics_data.get('topics', [])
+                
+                self.log_agent_action("Topic Analyzer", f"✅ Identified {len(topics)} debate topics")
+                
+                print("\n📋 DEBATE TOPICS:")
+                for i, topic in enumerate(topics[:3], 1):  # Show top 3 topics
+                    title = topic.get('title', 'Unknown Topic')
+                    priority = topic.get('priority', 'N/A')
+                    print(f"   {i}. {title} (Priority: {priority}/10)")
+            else:
+                self.log_agent_action("Topic Analyzer", "❌ Topic analysis failed", topic_result)
+                topics = []
+            
+            # Step 5: Initialize Debate Session
+            self.log_step("STEP 5", "Starting debate session...", "🎭")
+            
+            import uuid
+            session_id = f"debate_{uuid.uuid4().hex[:8]}"
+            
+            session_context = {
+                "policy_name": policy_title,
+                "participants": [s.get('name', 'Unknown') for s in stakeholders],
+                "topics": topics[:2] if topics else []  # Use top 2 topics
+            }
+            
+            session_result = self.debate_moderator._run(session_id, "start", json.dumps(session_context))
+            self.log_agent_action("Debate Moderator", f"✅ Session {session_id} started")
+            
+            # Step 6: Live Debate Simulation
+            self.log_step("STEP 6", "LIVE DEBATE IN PROGRESS", "🗣️")
+            
+            if len(topics) > 0 and len(stakeholders) >= 2:
+                # Use first topic for debate
+                debate_topic = topics[0]
+                
+                print(f"\n🎯 DEBATING: {debate_topic.get('title', 'Unknown Topic')}")
+                print(f"📝 Description: {debate_topic.get('description', 'No description')}")
+                print("\n" + "="*60)
+                
+                # Round 1: Opening Statements
+                print("\n🔴 ROUND 1: OPENING STATEMENTS")
+                print("-" * 30)
+                
+                for i, stakeholder in enumerate(stakeholders):
+                    name = stakeholder.get('name', 'Unknown')
+                    self.log_agent_action(f"{name} Agent", f"Preparing opening statement...")
+                    
+                    time.sleep(1)  # Simulate thinking time
+                    
+                    argument_result = self.argument_generator._run(
+                        name, 
+                        json.dumps(debate_topic), 
+                        "claim"
+                    )
+                    
+                    if not argument_result.startswith("Error"):
+                        try:
+                            argument = json.loads(argument_result)
+                            content = argument.get('content', 'No content available')
+                            strength = argument.get('strength', 'N/A')
+                            
+                            print(f"\n💬 {name}:")
+                            print(f"   {content}")
+                            print(f"   (Argument strength: {strength}/10)")
+                            
+                            self.log_agent_action(f"{name} Agent", "✅ Statement delivered")
+                            
+                        except json.JSONDecodeError:
+                            print(f"\n💬 {name}: [Argument parsing failed]")
+                    else:
+                        print(f"\n💬 {name}: [Failed to generate argument]")
+                
+                # Round 2: Rebuttals
+                print(f"\n🟡 ROUND 2: REBUTTALS")
+                print("-" * 20)
+                
+                for i, stakeholder in enumerate(stakeholders):
+                    name = stakeholder.get('name', 'Unknown')
+                    other_stakeholder = stakeholders[1-i].get('name', 'Other Party')
+                    
+                    self.log_agent_action(f"{name} Agent", f"Preparing rebuttal to {other_stakeholder}...")
+                    
+                    time.sleep(1)
+                    
+                    rebuttal_result = self.argument_generator._run(
+                        name, 
+                        json.dumps(debate_topic), 
+                        "rebuttal"
+                    )
+                    
+                    if not rebuttal_result.startswith("Error"):
+                        try:
+                            rebuttal = json.loads(rebuttal_result)
+                            content = rebuttal.get('content', 'No content available')
+                            
+                            print(f"\n🔄 {name} (responding to {other_stakeholder}):")
+                            print(f"   {content}")
+                            
+                            self.log_agent_action(f"{name} Agent", "✅ Rebuttal delivered")
+                            
+                        except json.JSONDecodeError:
+                            print(f"\n🔄 {name}: [Rebuttal parsing failed]")
+                    else:
+                        print(f"\n🔄 {name}: [Failed to generate rebuttal]")
+                
+                # A2A Message Exchange
+                print(f"\n🔵 AGENT-TO-AGENT COMMUNICATION")
+                print("-" * 35)
+                
+                if len(stakeholders) >= 2:
+                    sender = stakeholders[0].get('name', 'Stakeholder 1')
+                    receiver = stakeholders[1].get('name', 'Stakeholder 2')
+                    
+                    self.log_agent_action(f"{sender} Agent", f"Sending A2A message to {receiver}...")
+                    
+                    message_result = self.a2a_messenger._run(
+                        f"{sender} Agent",
+                        f"{receiver} Agent",
+                        "argument",
+                        "I believe we need to find common ground on this issue.",
+                        json.dumps({"topic_id": debate_topic.get("topic_id", "unknown")})
+                    )
+                    
+                    if not message_result.startswith("Error"):
+                        try:
+                            message = json.loads(message_result)
+                            msg_id = message.get('message_id', 'Unknown')
+                            print(f"\n📧 A2A Message {msg_id}:")
+                            print(f"   From: {sender} Agent")
+                            print(f"   To: {receiver} Agent")
+                            print(f"   Content: {message.get('content', 'No content')}")
+                            
+                            self.log_agent_action("A2A System", "✅ Message delivered")
+                            
+                        except json.JSONDecodeError:
+                            print(f"\n📧 A2A Message: [Parsing failed]")
+                    else:
+                        print(f"\n📧 A2A Message: [Failed to send]")
+            
+            # Step 7: Conclude Debate
+            self.log_step("STEP 7", "Concluding debate session...", "🏁")
+            
+            end_result = self.debate_moderator._run(session_id, "end")
+            self.log_agent_action("Debate Moderator", f"✅ Session ended: {end_result}")
+            
+            print("\n" + "="*60)
+            print("🎉 DEBATE COMPLETED!")
+            print("="*60)
+            
+            print(f"\n📊 SUMMARY:")
+            print(f"   • Policy: {policy_title}")
+            print(f"   • Participants: {len(stakeholders)} stakeholders")
+            print(f"   • Topics: {len(topics)} debate topics")
+            print(f"   • Session ID: {session_id}")
+            
+            print(f"\n📁 Data stored in:")
+            print(f"   • Knowledge base: knowledge/stakeholders/")
+            print(f"   • Debate session: knowledge/debates/sessions/{session_id}.json")
+            print(f"   • A2A messages: knowledge/debates/messages/")
+            
+        except Exception as e:
+            self.log_step("ERROR", f"Debate failed: {str(e)}", "❌")
+            import traceback
+            traceback.print_exc()
+
+def main():
+    """Run the real-time debate system"""
+    import sys
+    
+    policy_name = "policy_2"  # Default to shorter policy
+    if len(sys.argv) > 1:
+        policy_name = sys.argv[1]
+    
+    print(f"🚀 Starting real-time debate for: {policy_name}")
+    
+    try:
+        debate_system = RealTimeDebateSystem()
+        debate_system.run_debate(policy_name)
+    except Exception as e:
+        print(f"❌ System initialization failed: {e}")
+
+if __name__ == "__main__":
+    main() 

@@ -1,0 +1,48 @@
+{
+  "session_id": "debate_ef408644",
+  "policy_name": "Rent Stabilization Ordinance Amendment",
+  "moderator": "Policy Debate Moderator",
+  "participants": [
+    "Tenants",
+    "Landlords"
+  ],
+  "topics": [
+    {
+      "topic_id": "economic_impact",
+      "title": "Economic Viability for Landlords vs. Tenant Affordability",
+      "description": "This topic explores the financial consequences of the ordinance's provisions, particularly the rent caps and fee limitations, on landlord profitability and property value, balanced against the intended goal of ensuring affordable and predictable housing costs for tenants. It includes discussions on potential impacts on property maintenance, investment, and housing supply.",
+      "priority": 10,
+      "stakeholders_involved": [
+        "Landlords",
+        "Tenants"
+      ],
+      "key_questions": [
+        "How will the 5% or CPI rent cap impact landlords' ability to cover increasing operating costs (e.g., property taxes, insurance, maintenance) and achieve a reasonable return on investment?",
+        "Will the restriction on additional fees significantly reduce landlord revenue, and if so, how might landlords seek to offset these changes?",
+        "To what extent will the ordinance genuinely improve housing affordability for tenants, particularly for diverse income levels, and prevent displacement?",
+        "Could the regulations disincentivize property maintenance or new rental housing development, potentially leading to a decrease in housing quality or supply in the long run?"
+      ]
+    },
+    {
+      "topic_id": "implementation_enforcement",
+      "title": "Operational Burden and Enforcement Effectiveness",
+      "description": "This topic focuses on the practical challenges landlords will face in complying with the new rules (e.g., 90-day notice, comprehensive fee disclosure, advertised price requirements) and the mechanisms for effective enforcement from the tenant's perspective. It also covers the appropriateness and implications of specified penalties and legal recourse for violations.",
+      "priority": 9,
+      "stakeholders_involved": [
+        "Landlords",
+        "Tenants"
+      ],
+      "key_questions": [
+        "What new administrative burdens and costs will landlords incur to ensure compliance with the 90-day notice period, fee transparency, and rent cap calculations?",
+        "Are the specified penalties ($1,000 per violation, actual damages, and attorney fees) appropriate and equitable for deterring non-compliance without being overly punitive, especially for small landlords?",
+        "How will the city or relevant authorities effectively monitor and enforce the ordinance to prevent landlord circumvention, hidden charges, or 'creative' fee structures?",
+        "What accessible processes will be established for tenants to report violations, seek redress, and recover damages or attorney fees, and will these processes be efficient and fair?"
+      ]
+    }
+  ],
+  "rounds": [],
+  "start_time": "2025-07-12T16:47:41.580657",
+  "end_time": "2025-07-12T16:48:08.814662",
+  "status": "completed",
+  "summary": ""
+}

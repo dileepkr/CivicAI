@@ -1,0 +1,64 @@
+{
+  "session_id": "debate_4fba7c03",
+  "policy_name": "Rent Stabilization Ordinance Amendment",
+  "moderator": "Policy Debate Moderator",
+  "participants": [
+    "Tenants",
+    "Landlords"
+  ],
+  "topics": [
+    {
+      "topic_id": "economic_viability_supply",
+      "title": "Economic Viability of Rental Properties and Impact on Housing Supply",
+      "description": "This topic explores whether the imposed rent caps and fee restrictions allow landlords to maintain profitable operations, cover rising operational costs (such as property taxes, insurance, and maintenance), and invest in property upkeep. It also examines the potential for landlords to exit the rental market, reduce maintenance quality, or disincentivize new housing development, thereby impacting overall housing supply and quality for tenants.",
+      "priority": 10,
+      "stakeholders_involved": [
+        "Tenants",
+        "Landlords"
+      ],
+      "key_questions": [
+        "Will the rent cap (5% or CPI, whichever is lower) allow landlords to adequately cover increasing operational costs, property taxes, and insurance, especially in times of high inflation or rising expenses?",
+        "What is the projected impact of reduced profitability on landlord investment in property maintenance, upgrades, and overall property quality?",
+        "Will this ordinance lead to landlords converting rental units to other uses, selling their properties, or disincentivizing new construction, thereby reducing the available rental housing supply?",
+        "How will potential changes in housing supply or quality, if any, ultimately affect tenants seeking affordable and well-maintained housing?"
+      ]
+    },
+    {
+      "topic_id": "fairness_effectiveness_protections",
+      "title": "Fairness and Effectiveness of Tenant Protections vs. Landlord Rights",
+      "description": "This topic delves into whether the ordinance effectively achieves its stated purpose of protecting tenants from excessive rent increases and hidden fees, ensuring housing affordability and predictability. It also examines whether these protections are balanced fairly against the legitimate financial interests and rights of landlords to manage their properties, achieve a reasonable return on investment, and operate within a stable regulatory environment.",
+      "priority": 9,
+      "stakeholders_involved": [
+        "Tenants",
+        "Landlords"
+      ],
+      "key_questions": [
+        "Are the 5% or CPI rent caps sufficient to ensure housing affordability and predictability for tenants, while also allowing landlords a fair return on their investment?",
+        "Do the restrictions on additional fees genuinely protect tenants from 'hidden fees' and ensure pricing transparency, or do they unduly restrict landlords' ability to charge for legitimate services?",
+        "Is the 90-day notice period for rent increases reasonable for both tenants to plan for financial adjustments and for landlords to adapt to market conditions?",
+        "Are the tenant protections equitable, or do they potentially create an imbalanced relationship that could lead to unintended negative consequences for either party?"
+      ]
+    },
+    {
+      "topic_id": "enforcement_compliance_legal_risks",
+      "title": "Enforcement Mechanisms, Compliance Burden, and Legal Ramifications",
+      "description": "This topic focuses on the practicalities and consequences of enforcing the ordinance. It will discuss the effectiveness and fairness of the penalties (up to $1,000 per violation, plus actual damages and attorney fees) in deterring non-compliance, the administrative burden placed on landlords to ensure compliance (e.g., accurately advertising all fees), and the potential for increased litigation or legal costs for both tenants and landlords.",
+      "priority": 8,
+      "stakeholders_involved": [
+        "Tenants",
+        "Landlords"
+      ],
+      "key_questions": [
+        "Are the proposed penalties (up to $1,000 per violation, plus actual damages and attorney fees) proportionate and effective in deterring landlord non-compliance without creating an excessive burden or risk?",
+        "What is the anticipated administrative and financial burden for landlords to comply with new notice requirements, fee restrictions, and advertising rules, particularly for smaller property owners?",
+        "Will the ability for tenants to recover actual damages and attorney fees lead to an increase in legal disputes, and what are the potential implications for access to justice and the local court system?",
+        "How will the enforcement mechanisms ensure clarity, consistency, and fairness in applying the ordinance to both tenants and landlords, and how will disputes be resolved efficiently?"
+      ]
+    }
+  ],
+  "rounds": [],
+  "start_time": "2025-07-12T17:04:25.657180",
+  "end_time": "2025-07-12T17:05:15.572590",
+  "status": "completed",
+  "summary": ""
+}

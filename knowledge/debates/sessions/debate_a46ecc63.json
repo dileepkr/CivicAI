@@ -1,0 +1,46 @@
+{
+  "session_id": "debate_a46ecc63",
+  "policy_name": "AB 1248: Hiring of real property: fees and charges.",
+  "moderator": "Policy Debate Moderator",
+  "participants": [
+    "Landlords / Landlord's Agents",
+    "Prospective and Current Tenants"
+  ],
+  "topics": [
+    {
+      "topic_id": "economic_impacts",
+      "title": "Economic Viability for Landlords and Impact on Rental Prices",
+      "description": "This topic explores the financial implications of the policy on landlords, including potential revenue loss from prohibited fees, increased costs from utility deductions (especially for common areas under RUBS), and the general administrative burden of compliance. It also questions how these cost pressures might translate into higher advertised base rents for tenants, potentially counteracting the affordability aims of the policy, or impact the overall supply and quality of rental housing.",
+      "priority": 10,
+      "stakeholders_involved": [
+        "Landlords / Landlord's Agents",
+        "Prospective and Current Tenants"
+      ],
+      "key_questions": [
+        "Will the elimination of various 'required fees' and the mandated absorption of common area utility costs significantly reduce landlord profitability, making rental property ownership less attractive?",
+        "How will landlords adjust their pricing strategies in response to the 'all-in' advertising requirement? Will this lead to higher base rents that effectively negate the affordability benefit for tenants?",
+        "Could increased operational costs and legal liability lead to a decrease in the supply of available rental housing or reduced investment in property maintenance and upgrades?"
+      ]
+    },
+    {
+      "topic_id": "operational_compliance",
+      "title": "Operational Challenges and Administrative Burden for Landlords",
+      "description": "This topic focuses on the practical difficulties landlords will face in complying with the new policy, including the nuanced redefinition and disclosure of housing services, the complex and stringent requirements for Ratio Utility Billing Systems (RUBS) for water/sewer, and the strict advertising mandates. It questions the feasibility of widespread and accurate compliance, especially for smaller landlords with fewer resources, and the overall administrative load imposed by the new rules.",
+      "priority": 9,
+      "stakeholders_involved": [
+        "Landlords / Landlord's Agents",
+        "Prospective and Current Tenants"
+      ],
+      "key_questions": [
+        "Are the definitions of 'housing services,' 'optional housing services,' and 'required fees' sufficiently clear and distinct to prevent confusion, misclassification, and disputes in practice?",
+        "Is the administrative burden of complying with detailed RUBS regulations (e.g., common area deductions, historical bill disclosures, tenant inspection rights) practical and sustainable for all types of landlords?",
+        "Will the April 1, 2026, implementation date provide sufficient time for landlords to update their business practices, accounting systems, rental agreements, and advertising materials to ensure full compliance?"
+      ]
+    }
+  ],
+  "rounds": [],
+  "start_time": "2025-07-12T16:50:06.467869",
+  "end_time": "2025-07-12T16:50:49.130256",
+  "status": "completed",
+  "summary": ""
+}

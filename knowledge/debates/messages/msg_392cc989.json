@@ -1,0 +1,13 @@
+{
+  "message_id": "msg_392cc989",
+  "sender": "Tenants",
+  "receiver": "Landlords",
+  "message_type": "argument",
+  "content": "Let me address your concerns about this policy.",
+  "context": {
+    "topic": "Effectiveness and Economic Impact of Rent Control Caps",
+    "round": 3
+  },
+  "timestamp": "2025-07-12T17:02:20.414142",
+  "requires_response": true
+}

@@ -1,0 +1,477 @@
+#!/usr/bin/env python
+"""
+Weave-Integrated Real-Time Policy Debate System
+Perfect for hackathon demonstrations with full tracing capabilities
+"""
+
+import os
+import json
+import time
+import uuid
+from datetime import datetime
+from dotenv import load_dotenv
+import weave
+from typing import Dict, List, Any, Optional
+
+from src.dynamic_crew.tools.custom_tool import (
+    PolicyFileReader,
+    StakeholderIdentifier,
+    KnowledgeBaseManager,
+    StakeholderResearcher,
+    TopicAnalyzer,
+    ArgumentGenerator,
+    A2AMessenger,
+    DebateModerator
+)
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Weave with project name
+weave.init(project_name="civicai-hackathon")
+
+class WeaveDebateSystem:
+    """
+    Real-time debate system with comprehensive Weave tracing for hackathon demos
+    """
+    
+    def __init__(self):
+        self.policy_reader = PolicyFileReader()
+        self.stakeholder_identifier = StakeholderIdentifier()
+        self.kb_manager = KnowledgeBaseManager()
+        self.stakeholder_researcher = StakeholderResearcher()
+        self.topic_analyzer = TopicAnalyzer()
+        self.argument_generator = ArgumentGenerator()
+        self.a2a_messenger = A2AMessenger()
+        self.debate_moderator = DebateModerator()
+        
+        # Session tracking
+        self.session_id = f"debate_{uuid.uuid4().hex[:8]}"
+        self.debate_round = 0
+        self.stakeholder_agents = {}
+        
+        print(f"🔗 Weave Tracing Active - Session: {self.session_id}")
+        print(f"📊 View traces at: https://wandb.ai/your-username/civicai-hackathon")
+    
+    @weave.op()
+    def load_policy(self, policy_name: str) -> Dict[str, Any]:
+        """
+        Load and parse policy document with Weave tracing
+        """
+        print(f"\n📄 Loading Policy: {policy_name}")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "policy_name": policy_name,
+            "session_id": self.session_id,
+            "step": "load_policy"
+        }):
+            # Read policy file
+            policy_data = self.policy_reader._run(f"{policy_name}.json")
+            
+            if policy_data.startswith("Error"):
+                raise Exception(f"Policy loading failed: {policy_data}")
+            
+            policy_info = json.loads(policy_data)
+            
+            print(f"✅ Policy loaded: {policy_info.get('title', 'Unknown Title')}")
+            print(f"📊 Policy text length: {len(policy_info.get('text', ''))} characters")
+            
+            return policy_info
+    
+    @weave.op()
+    def identify_stakeholders(self, policy_text: str) -> List[Dict[str, Any]]:
+        """
+        Identify policy stakeholders with Weave tracing
+        """
+        print(f"\n🎯 Identifying Stakeholders...")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "policy_text_length": len(policy_text),
+            "session_id": self.session_id,
+            "step": "identify_stakeholders"
+        }):
+            # Run stakeholder identification
+            stakeholder_result = self.stakeholder_identifier._run(policy_text)
+            
+            if stakeholder_result.startswith("Error"):
+                raise Exception(f"Stakeholder identification failed: {stakeholder_result}")
+            
+            stakeholder_data = json.loads(stakeholder_result)
+            stakeholder_list = stakeholder_data.get('stakeholders', [])
+            
+            print(f"✅ Found {len(stakeholder_list)} stakeholders:")
+            for i, stakeholder in enumerate(stakeholder_list, 1):
+                name = stakeholder.get('name', 'Unknown')
+                stakeholder_type = stakeholder.get('type', 'unknown')
+                stance = stakeholder.get('likely_stance', 'unknown')
+                print(f"   {i}. {name} ({stakeholder_type}) - Stance: {stance}")
+            
+            return stakeholder_list
+    
+    @weave.op()
+    def research_stakeholder_perspective(self, stakeholder: Dict[str, Any], policy_text: str) -> Dict[str, Any]:
+        """
+        Research stakeholder perspective with Weave tracing
+        """
+        stakeholder_name = stakeholder.get('name', 'Unknown')
+        print(f"\n🔍 Researching {stakeholder_name} perspective...")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "stakeholder_name": stakeholder_name,
+            "stakeholder_type": stakeholder.get('type', 'unknown'),
+            "session_id": self.session_id,
+            "step": "research_stakeholder"
+        }):
+            # Conduct stakeholder research
+            research_result = self.stakeholder_researcher._run(
+                json.dumps(stakeholder), 
+                policy_text
+            )
+            
+            if research_result.startswith("Error"):
+                print(f"❌ Research failed for {stakeholder_name}: {research_result}")
+                return {"error": research_result}
+            
+            research_data = json.loads(research_result)
+            
+            print(f"✅ Research completed for {stakeholder_name}")
+            print(f"   📊 Confidence: {research_data.get('confidence_level', 'unknown')}")
+            print(f"   📋 Summary: {research_data.get('research_summary', '')[:100]}...")
+            
+            return research_data
+    
+    @weave.op()
+    def analyze_debate_topics(self, policy_text: str, stakeholder_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Analyze debate topics with Weave tracing
+        """
+        print(f"\n📋 Analyzing debate topics...")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "stakeholder_count": len(stakeholder_data.get('stakeholders', [])),
+            "session_id": self.session_id,
+            "step": "analyze_topics"
+        }):
+            # Analyze topics
+            topic_result = self.topic_analyzer._run(policy_text, json.dumps(stakeholder_data))
+            
+            if topic_result.startswith("Error"):
+                print(f"❌ Topic analysis failed: {topic_result}")
+                return []
+            
+            topics_data = json.loads(topic_result)
+            topics_list = topics_data.get('topics', [])
+            
+            print(f"✅ Found {len(topics_list)} debate topics:")
+            for i, topic in enumerate(topics_list[:3], 1):  # Show top 3
+                title = topic.get('title', 'Unknown Topic')
+                priority = topic.get('priority', 0)
+                print(f"   {i}. {title} (Priority: {priority}/10)")
+            
+            return topics_list
+    
+    @weave.op()
+    def generate_argument(self, stakeholder_name: str, topic: Dict[str, Any], argument_type: str) -> Dict[str, Any]:
+        """
+        Generate stakeholder argument with Weave tracing
+        """
+        print(f"\n💬 {stakeholder_name} generating {argument_type}...")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "stakeholder_name": stakeholder_name,
+            "argument_type": argument_type,
+            "topic_title": topic.get('title', 'Unknown'),
+            "topic_priority": topic.get('priority', 0),
+            "session_id": self.session_id,
+            "debate_round": self.debate_round,
+            "step": "generate_argument"
+        }):
+            # Generate argument
+            argument_result = self.argument_generator._run(
+                stakeholder_name,
+                json.dumps(topic),
+                argument_type
+            )
+            
+            if argument_result.startswith("Error"):
+                print(f"❌ Argument generation failed: {argument_result}")
+                return {"error": argument_result}
+            
+            argument_data = json.loads(argument_result)
+            
+            # Display argument summary
+            strength = argument_data.get('strength', 0)
+            content = argument_data.get('content', '')
+            evidence_count = len(argument_data.get('evidence', []))
+            
+            print(f"   🗣️  {stakeholder_name}: {argument_type.upper()}")
+            print(f"   💪 Strength: {strength}/10")
+            print(f"   📄 Content: {content[:150]}...")
+            print(f"   🔍 Evidence points: {evidence_count}")
+            
+            return argument_data
+    
+    @weave.op()
+    def send_a2a_message(self, sender: str, receiver: str, message_type: str, content: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send agent-to-agent message with Weave tracing
+        """
+        print(f"\n📧 A2A Message: {sender} → {receiver}")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "sender": sender,
+            "receiver": receiver,
+            "message_type": message_type,
+            "message_length": len(content),
+            "session_id": self.session_id,
+            "debate_round": self.debate_round,
+            "step": "a2a_message"
+        }):
+            # Send message
+            message_result = self.a2a_messenger._run(
+                sender, receiver, message_type, content, json.dumps(context)
+            )
+            
+            if message_result.startswith("Error"):
+                print(f"❌ A2A message failed: {message_result}")
+                return {"error": message_result}
+            
+            message_data = json.loads(message_result)
+            
+            print(f"   📝 Type: {message_type}")
+            print(f"   💬 Content: {content[:100]}...")
+            
+            return message_data
+    
+    @weave.op()
+    def moderate_debate_session(self, session_id: str, action: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Moderate debate session with Weave tracing
+        """
+        print(f"\n🎭 Debate Moderator: {action.upper()}")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "session_id": session_id,
+            "moderator_action": action,
+            "has_context": context is not None,
+            "debate_round": self.debate_round,
+            "step": "moderate_debate"
+        }):
+            # Moderate session
+            if context:
+                moderator_result = self.debate_moderator._run(session_id, action, json.dumps(context))
+            else:
+                moderator_result = self.debate_moderator._run(session_id, action)
+            
+            print(f"   📋 Status: {moderator_result}")
+            
+            return moderator_result
+    
+    @weave.op()
+    def run_debate_round(self, stakeholder_list: List[Dict[str, Any]], topics_list: List[Dict[str, Any]], round_type: str) -> Dict[str, Any]:
+        """
+        Run a complete debate round with Weave tracing
+        """
+        self.debate_round += 1
+        print(f"\n🎭 === DEBATE ROUND {self.debate_round}: {round_type.upper()} ===")
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "round_number": self.debate_round,
+            "round_type": round_type,
+            "stakeholder_count": len(stakeholder_list),
+            "session_id": self.session_id,
+            "step": "debate_round"
+        }):
+            round_results = {
+                "round_number": self.debate_round,
+                "round_type": round_type,
+                "arguments": [],
+                "a2a_messages": [],
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Generate arguments for each stakeholder
+            for stakeholder in stakeholder_list:
+                stakeholder_name = stakeholder.get('name', 'Unknown')
+                
+                # Pick the highest priority topic for this round
+                topic = topics_list[0] if topics_list else {"title": "General Policy Discussion", "priority": 5}
+                
+                # Generate argument
+                argument = self.generate_argument(stakeholder_name, topic, round_type)
+                if "error" not in argument:
+                    round_results["arguments"].append({
+                        "stakeholder": stakeholder_name,
+                        "argument": argument,
+                        "topic": topic.get('title', 'Unknown')
+                    })
+            
+            # Generate A2A messages between stakeholders
+            if len(stakeholder_list) >= 2:
+                for i in range(len(stakeholder_list)):
+                    for j in range(i + 1, len(stakeholder_list)):
+                        sender = stakeholder_list[i].get('name', 'Unknown')
+                        receiver = stakeholder_list[j].get('name', 'Unknown')
+                        
+                        # Create message content based on round type
+                        if round_type == "claim":
+                            content = f"My position on this policy is clear based on our stakeholder interests."
+                        elif round_type == "rebuttal":
+                            content = f"I must respectfully disagree with your position for these reasons."
+                        else:
+                            content = f"Let me address your concerns about this policy."
+                        
+                        message = self.send_a2a_message(
+                            sender, receiver, "argument", content,
+                            {"topic": topic.get('title', 'Unknown'), "round": self.debate_round}
+                        )
+                        
+                        if "error" not in message:
+                            round_results["a2a_messages"].append({
+                                "sender": sender,
+                                "receiver": receiver,
+                                "message": message
+                            })
+            
+            print(f"✅ Round {self.debate_round} completed:")
+            print(f"   🗣️  Arguments generated: {len(round_results['arguments'])}")
+            print(f"   📧 A2A messages sent: {len(round_results['a2a_messages'])}")
+            
+            return round_results
+    
+    @weave.op()
+    def run_full_debate(self, policy_name: str) -> Dict[str, Any]:
+        """
+        Run complete debate session with comprehensive Weave tracing
+        """
+        print(f"\n🚀 === WEAVE-TRACED POLICY DEBATE: {policy_name.upper()} ===")
+        print(f"🔗 Session ID: {self.session_id}")
+        
+        start_time = datetime.now()
+        
+        # Add attributes to the weave call
+        with weave.attributes({
+            "policy_name": policy_name,
+            "session_id": self.session_id,
+            "start_time": start_time.isoformat(),
+            "step": "full_debate"
+        }):
+            try:
+                # Step 1: Load Policy
+                policy_info = self.load_policy(policy_name)
+                policy_text = policy_info.get("text", "")
+                
+                # Step 2: Identify Stakeholders
+                stakeholder_list = self.identify_stakeholders(policy_text)
+                
+                # Step 3: Research Stakeholder Perspectives
+                research_results = {}
+                for stakeholder in stakeholder_list:
+                    stakeholder_name = stakeholder.get('name', 'Unknown')
+                    research_data = self.research_stakeholder_perspective(stakeholder, policy_text)
+                    research_results[stakeholder_name] = research_data
+                
+                # Step 4: Analyze Debate Topics
+                stakeholder_data = {
+                    "stakeholders": stakeholder_list,
+                    "total_count": len(stakeholder_list),
+                    "analysis_summary": f"Debate between {len(stakeholder_list)} stakeholders"
+                }
+                topics_list = self.analyze_debate_topics(policy_text, stakeholder_data)
+                
+                # Step 5: Initialize Debate Session
+                session_context = {
+                    "policy_name": policy_info.get("title", "Unknown Policy"),
+                    "participants": [s.get('name', 'Unknown') for s in stakeholder_list],
+                    "topics": topics_list[:3],  # Top 3 topics
+                    "session_id": self.session_id
+                }
+                
+                self.moderate_debate_session(self.session_id, "start", session_context)
+                
+                # Step 6: Run Debate Rounds
+                debate_results = {
+                    "session_id": self.session_id,
+                    "policy_info": policy_info,
+                    "stakeholders": stakeholder_list,
+                    "topics": topics_list,
+                    "research_results": research_results,
+                    "debate_rounds": [],
+                    "start_time": start_time.isoformat(),
+                    "end_time": None
+                }
+                
+                # Round 1: Opening Claims
+                round1 = self.run_debate_round(stakeholder_list, topics_list, "claim")
+                debate_results["debate_rounds"].append(round1)
+                
+                time.sleep(1)  # Brief pause for readability
+                
+                # Round 2: Rebuttals
+                round2 = self.run_debate_round(stakeholder_list, topics_list, "rebuttal")
+                debate_results["debate_rounds"].append(round2)
+                
+                time.sleep(1)  # Brief pause for readability
+                
+                # Round 3: Closing Arguments
+                round3 = self.run_debate_round(stakeholder_list, topics_list, "closing")
+                debate_results["debate_rounds"].append(round3)
+                
+                # Step 7: End Debate Session
+                self.moderate_debate_session(self.session_id, "end")
+                
+                end_time = datetime.now()
+                debate_results["end_time"] = end_time.isoformat()
+                
+                print(f"\n🎉 === DEBATE SESSION COMPLETED ===")
+                print(f"📊 Duration: {(end_time - start_time).total_seconds():.1f} seconds")
+                print(f"🗣️  Total Rounds: {len(debate_results['debate_rounds'])}")
+                print(f"👥 Stakeholders: {len(stakeholder_list)}")
+                print(f"📋 Topics: {len(topics_list)}")
+                print(f"🔗 View full trace at: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-hackathon")
+                
+                return debate_results
+                
+            except Exception as e:
+                print(f"❌ Error in debate session: {e}")
+                raise
+
+def main():
+    """
+    Main function to run Weave-traced debate
+    """
+    if len(sys.argv) < 2:
+        print("Usage: python weave_debate.py <policy_name>")
+        print("Example: python weave_debate.py policy_1")
+        return
+    
+    policy_name = sys.argv[1]
+    
+    # Remove .json extension if provided
+    if policy_name.endswith('.json'):
+        policy_name = policy_name[:-5]
+    
+    # Check if policy file exists
+    policy_file_path = os.path.join("test_data", f"{policy_name}.json")
+    if not os.path.exists(policy_file_path):
+        print(f"❌ Error: Policy file not found at {policy_file_path}")
+        return
+    
+    # Run Weave-traced debate
+    debate_system = WeaveDebateSystem()
+    results = debate_system.run_full_debate(policy_name)
+    
+    print(f"\n📁 Debate session data saved to knowledge base")
+    print(f"🔗 Weave traces: https://wandb.ai/aniruddhr04-university-of-cincinnati/civicai-hackathon")
+
+if __name__ == "__main__":
+    import sys
+    main() 

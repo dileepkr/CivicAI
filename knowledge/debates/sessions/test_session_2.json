@@ -1,0 +1,15 @@
+{
+  "session_id": "test_session_2",
+  "policy_name": "Test Policy",
+  "moderator": "AI Moderator",
+  "participants": [
+    "A",
+    "B"
+  ],
+  "topics": [],
+  "rounds": [],
+  "start_time": "2025-07-13T05:37:15.977804",
+  "end_time": null,
+  "status": "preparing",
+  "summary": ""
+}
