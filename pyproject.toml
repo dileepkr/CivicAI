@@ -36,6 +36,8 @@ dependencies = [
     "weave>=0.51.56",
     # Policy discovery with Exa API
     "exa-py>=0.0.1",
+    # A2A protocol for agent communication
+    "a2a-sdk>=0.1.0",
     # FastAPI and web components
     "fastapi>=0.104.1,<1.0.0",
     "uvicorn>=0.24.0,<1.0.0",

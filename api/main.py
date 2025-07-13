@@ -45,6 +45,16 @@ from src.dynamic_crew.debate.systems.human import HumanDebateSystem
 # Import the crew system for agentic workflows
 from src.dynamic_crew.crew import DynamicCrewAutomationForPolicyAnalysisAndDebateCrew
 
+# Import policy discovery agent
+from policy_discovery.agent import PolicyDiscoveryAgent
+from policy_discovery.models import UserContext, RegulationTiming, PolicyDiscoveryResponse
+
+# Import A2A protocol integration
+from api.a2a_integration import (
+    CivicAIA2AAgent, A2ACoordinator, get_coordinator, 
+    cleanup_coordinator, is_a2a_available
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -161,8 +171,99 @@ except Exception as e:
     logger.error(f"⚠️  Crew system initialization failed: {e}")
     crew_system = None
 
-def load_policy_data(policy_name: str) -> Dict[str, Any]:
-    """Load policy data from test_data directory"""
+# Initialize policy discovery agent
+try:
+    policy_discovery_agent = PolicyDiscoveryAgent()
+    logger.info("✅ Policy discovery agent initialized successfully")
+except Exception as e:
+    logger.error(f"⚠️  Policy discovery agent initialization failed: {e}")
+    policy_discovery_agent = None
+
+async def discover_policy_data(query: str, user_context: UserContext = None) -> Dict[str, Any]:
+    """Discover policy data using the policy discovery agent"""
+    if not policy_discovery_agent:
+        # Fallback to loading from test_data if agent not available
+        return load_policy_data_fallback(query)
+    
+    try:
+        # If no user context provided, create a focused one based on query
+        if not user_context:
+            user_context = UserContext(
+                location="San Francisco, CA",
+                stakeholder_roles=["citizen"],  # Generic role
+                interests=[query],  # Use exact query
+                regulation_timing=RegulationTiming.ALL
+            )
+        
+        # Use direct search with user's exact query to avoid predefined keywords
+        search_engine = policy_discovery_agent.search_engine
+        
+        # Search with the exact user query
+        search_results = await search_engine.search_policies(
+            query=query,
+            domains=[],  # Let Exa find the best sources
+            max_results=10
+        )
+        
+        # Create a simple result structure
+        if search_results:
+            top_result = search_results[0]
+            # Create a policy result manually - determine level from URL
+            from policy_discovery.models import GovernmentLevel
+            
+            url = top_result.get("url", "")
+            if any(domain in url for domain in ["congress.gov", "regulations.gov", "federalregister.gov"]):
+                level = GovernmentLevel.FEDERAL
+            elif any(domain in url for domain in ["ca.gov", "calmatters"]):
+                level = GovernmentLevel.STATE  
+            elif any(domain in url for domain in ["sf.gov", "sfplanning"]):
+                level = GovernmentLevel.LOCAL
+            else:
+                level = GovernmentLevel.FEDERAL  # Default
+                
+            policy_result = policy_discovery_agent._create_policy_result(top_result, level)
+            
+            if policy_result:
+                discovery_result = type('MockResult', (), {
+                    'priority_ranking': [policy_result],
+                    'total_found': len(search_results)
+                })()
+            else:
+                raise ValueError("Could not create policy result")
+        else:
+            raise ValueError("No search results found")
+        
+        # Get the top priority policy
+        if discovery_result.priority_ranking:
+            top_policy = discovery_result.priority_ranking[0]
+            
+            # Format the response using the agent's formatting method
+            policy_response = await policy_discovery_agent.format_policy_response(
+                user_context, top_policy
+            )
+            
+            return {
+                "id": top_policy.url.split("/")[-1] or query,
+                "title": policy_response.policy_document.title,
+                "date": top_policy.last_updated.isoformat() if top_policy.last_updated else "Unknown Date",
+                "summary": top_policy.summary,
+                "relevance": "high",
+                "text": policy_response.policy_document.text,
+                "url": top_policy.url,
+                "government_level": top_policy.government_level.value,
+                "domain": top_policy.domain.value,
+                "confidence_score": top_policy.confidence_score
+            }
+        else:
+            raise ValueError("No policies found")
+            
+    except Exception as e:
+        logger.error(f"Policy discovery failed: {e}")
+        # Fallback to test data
+        return load_policy_data_fallback(query)
+
+def load_policy_data_fallback(policy_name: str) -> Dict[str, Any]:
+    """Fallback method to load policy data from test_data directory"""
     policy_path = project_root / "test_data" / f"{policy_name}.json"
     
     if not policy_path.exists():
@@ -203,16 +304,73 @@ async def health_check():
 
 @app.get("/policies", response_model=List[PolicyResponse])
 async def get_policies():
-    """Get available policies"""
+    """Get available policies using policy discovery"""
     try:
         policies = []
-        test_data_dir = project_root / "test_data"
         
+        # Try to use policy discovery agent first
+        if policy_discovery_agent:
+            try:
+                # Create a minimal user context for general policy discovery
+                user_context = UserContext(
+                    location="San Francisco, CA",
+                    stakeholder_roles=["citizen"],
+                    interests=["policy"],  # Very generic interest
+                    regulation_timing=RegulationTiming.ALL
+                )
+                
+                # Use a simple general search instead of full discovery to avoid keyword expansion
+                search_engine = policy_discovery_agent.search_engine
+                search_results = await search_engine.search_policies(
+                    query="government policy regulations",
+                    domains=[],
+                    max_results=10
+                )
+                
+                # Create mock discovery result
+                from policy_discovery.models import GovernmentLevel
+                discovery_result = type('MockResult', (), {'priority_ranking': []})()
+                
+                for item in search_results:
+                    url = item.get("url", "")
+                    if any(domain in url for domain in ["congress.gov", "regulations.gov"]):
+                        level = GovernmentLevel.FEDERAL
+                    elif any(domain in url for domain in ["ca.gov", "calmatters"]):
+                        level = GovernmentLevel.STATE  
+                    elif any(domain in url for domain in ["sf.gov", "sfplanning"]):
+                        level = GovernmentLevel.LOCAL
+                    else:
+                        level = GovernmentLevel.FEDERAL
+                        
+                    policy = policy_discovery_agent._create_policy_result(item, level)
+                    if policy:
+                        discovery_result.priority_ranking.append(policy)
+                
+                # Convert discovered policies to API format
+                for policy_result in discovery_result.priority_ranking[:10]:  # Limit to top 10
+                    policy_data = {
+                        "id": policy_result.url.split("/")[-1] or f"policy_{len(policies)}",
+                        "title": policy_result.title,
+                        "date": policy_result.last_updated.isoformat() if policy_result.last_updated else "Unknown Date",
+                        "summary": policy_result.summary,
+                        "relevance": "high" if policy_result.confidence_score > 0.7 else "medium",
+                        "text": policy_result.content_preview or policy_result.summary
+                    }
+                    policies.append(PolicyResponse(**policy_data))
+                    
+                if policies:
+                    return policies
+                    
+            except Exception as e:
+                logger.error(f"Policy discovery failed, falling back to test data: {e}")
+        
+        # Fallback to test data if policy discovery fails or no agent available
+        test_data_dir = project_root / "test_data"
         if test_data_dir.exists():
             for file in test_data_dir.glob("*.json"):
                 policy_name = file.stem
                 try:
-                    policy_data = load_policy_data(policy_name)
+                    policy_data = load_policy_data_fallback(policy_name)
                     policies.append(PolicyResponse(**policy_data))
                 except Exception as e:
                     logger.error(f"Error loading policy {policy_name}: {e}")
@@ -224,9 +382,10 @@ async def get_policies():
 
 @app.get("/policies/{policy_id}", response_model=PolicyResponse)
 async def get_policy(policy_id: str):
-    """Get specific policy by ID"""
+    """Get specific policy by ID using policy discovery"""
     try:
-        policy_data = load_policy_data(policy_id)
+        # Try to discover policy using the ID as search query
+        policy_data = await discover_policy_data(policy_id)
         return PolicyResponse(**policy_data)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Policy not found")
@@ -240,7 +399,7 @@ async def start_debate(request: StartDebateRequest):
     try:
         # Validate policy exists
         try:
-            policy_data = load_policy_data(request.policy_name)
+            policy_data = await discover_policy_data(request.policy_name)
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail=f"Policy '{request.policy_name}' not found")
         
@@ -340,7 +499,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session_manager.remove_websocket(session_id)
 
 async def run_debate_with_streaming(session_id: str, session: Dict[str, Any], websocket: WebSocket):
-    """Run debate with real-time streaming"""
+    """Run debate with real-time streaming using A2A protocol"""
     try:
         # Update session status
         session_manager.update_session(session_id, {"status": "running"})
@@ -375,6 +534,9 @@ async def run_debate_with_streaming(session_id: str, session: Dict[str, Any], we
         # Update session status
         session_manager.update_session(session_id, {"status": "completed"})
         
+        # Clean up A2A coordinator
+        cleanup_coordinator(session_id)
+        
     except Exception as e:
         logger.error(f"Error running debate for session {session_id}: {e}")
         await websocket.send_text(json.dumps({
@@ -382,11 +544,37 @@ async def run_debate_with_streaming(session_id: str, session: Dict[str, Any], we
             "message": f"Debate failed: {str(e)}"
         }))
         session_manager.update_session(session_id, {"status": "error"})
+        
+        # Clean up A2A coordinator on error too
+        cleanup_coordinator(session_id)
 
 async def stream_debate_process(session_id: str, debate_system, policy_name: str, websocket: WebSocket):
-    """Stream the debate process with real-time updates"""
+    """Stream the debate process with real-time updates using A2A protocol"""
     
-    # Custom message handler for streaming
+    # Initialize A2A coordinator for this session
+    coordinator = get_coordinator(session_id)
+    coordinator.add_websocket(websocket)
+    
+    # Create A2A agents for the debate
+    moderator_agent = CivicAIA2AAgent(
+        agent_id="moderator",
+        agent_type="moderator",
+        role="Debate Moderator",
+        capabilities=["facilitate_debate", "manage_turns", "summarize"]
+    )
+    
+    policy_agent = CivicAIA2AAgent(
+        agent_id="policy_analyst",
+        agent_type="analyst",
+        role="Policy Analyst",
+        capabilities=["analyze_policy", "provide_context", "fact_check"]
+    )
+    
+    # Register agents with coordinator
+    coordinator.register_agent(moderator_agent)
+    coordinator.register_agent(policy_agent)
+    
+    # Custom message handler for streaming with A2A
     async def send_debate_message(sender: str, content: str, message_type: str = "debate_message", metadata: Dict[str, Any] = None):
         message = {
             "id": str(uuid.uuid4()),
@@ -402,8 +590,17 @@ async def stream_debate_process(session_id: str, debate_system, policy_name: str
         if session:
             session["messages"].append(message)
         
-        # Send via WebSocket
-        await websocket.send_text(json.dumps(message))
+        # Send via A2A protocol if available, otherwise WebSocket
+        if sender in ["moderator", "policy_analyst"]:
+            await coordinator.broadcast_message(
+                sender_id=sender,
+                content=content,
+                message_type=message_type,
+                metadata=metadata
+            )
+        else:
+            # Send via WebSocket for non-agent messages
+            await websocket.send_text(json.dumps(message))
         
         # Small delay to make streaming visible
         await asyncio.sleep(0.1)
@@ -465,8 +662,14 @@ async def run_agentic_policy_analysis(request: Dict[str, Any]):
         stakeholder_roles = request.get("stakeholder_roles", ["resident"])
         interests = request.get("interests", ["housing"])
         
-        # Load policy data
-        policy_data = load_policy_data(policy_name)
+        # Load policy data using discovery agent
+        user_context = UserContext(
+            location=user_location,
+            stakeholder_roles=stakeholder_roles,
+            interests=interests,
+            regulation_timing=RegulationTiming.ALL
+        )
+        policy_data = await discover_policy_data(policy_name, user_context)
         
         # Create stakeholder list for the crew
         stakeholder_list = [
@@ -514,6 +717,9 @@ async def search_policies_stream(request: Request):
         # Create a streaming response
         async def generate_stream():
             try:
+                # Parse keywords from prompt at the beginning
+                keywords = [kw.strip().lower() for kw in prompt.lower().split() if len(kw.strip()) > 1]
+                
                 # Send initial status
                 yield f"data: {json.dumps({'type': 'status', 'message': 'Initializing policy search...', 'step': 1, 'total_steps': 4})}\n\n"
                 await asyncio.sleep(0.1)
@@ -523,85 +729,146 @@ async def search_policies_stream(request: Request):
                 await asyncio.sleep(0.1)
                 
                 local_policies = []
-                test_data_dir = project_root / "test_data"
-                if test_data_dir.exists():
-                    for file in test_data_dir.glob("*.json"):
-                        policy_name = file.stem
-                        try:
-                            policy_data = load_policy_data(policy_name)
-                            
-                            # Enhanced search logic - search in title, summary, and policy text
-                            search_text = f"{policy_data['title']} {policy_data['summary']} {policy_data['text'][:2000]}".lower()
-                            keywords = [kw.strip().lower() for kw in prompt.lower().split() if len(kw.strip()) > 1]
-                            
-                            # Calculate relevance score based on keyword matches
-                            relevance_score = 0.0
-                            matched_keywords = []
-                            
-                            for keyword in keywords:
-                                if keyword in search_text:
-                                    matched_keywords.append(keyword)
-                                    # Higher score for matches in title
-                                    if keyword in policy_data["title"].lower():
-                                        relevance_score += 0.4
-                                    # Medium score for matches in policy text
-                                    elif keyword in policy_data["text"].lower():
-                                        relevance_score += 0.2
-                                    # Lower score for matches in summary
-                                    elif keyword in policy_data["summary"].lower():
-                                        relevance_score += 0.1
-                            
-                            # Determine if we should include this policy
-                            should_include = False
-                            
-                            # Include if we have keyword matches
-                            if matched_keywords:
-                                should_include = True
-                            # Include if no keywords provided (broad search)
-                            elif len(keywords) == 0:
-                                should_include = True
-                                relevance_score = 0.5  # Default relevance for broad search
-                            # Include if all keywords are too short (like "policy", "sf", etc.)
-                            elif len([k for k in keywords if len(k) > 2]) == 0:
-                                should_include = True
-                                relevance_score = 0.4  # Lower relevance for short keywords
-                            
-                            if should_include:
-                                # Generate a better summary from the policy text
-                                policy_text = policy_data["text"]
-                                summary = policy_data["summary"]
-                                if summary == "No summary available" and policy_text:
-                                    # Extract first meaningful sentence or paragraph
-                                    sentences = policy_text.split('.')[:3]
-                                    summary = '. '.join(sentences).strip()
-                                    if len(summary) > 200:
-                                        summary = summary[:197] + "..."
+                
+                # Try to use policy discovery agent for search
+                if policy_discovery_agent:
+                    try:
+                        # Create focused user context based only on search prompt
+                        user_context = UserContext(
+                            location="San Francisco, CA",
+                            stakeholder_roles=["citizen"],  # Generic role
+                            interests=[prompt],  # Use the exact search prompt, not keywords
+                            regulation_timing=RegulationTiming.ALL
+                        )
+                        
+                        # Use direct search with exact prompt to avoid keyword expansion
+                        search_engine = policy_discovery_agent.search_engine
+                        search_results = await search_engine.search_policies(
+                            query=prompt,
+                            domains=[],  # Let Exa find relevant sources
+                            max_results=max_results
+                        )
+                        
+                        # Convert search results to policy format
+                        from policy_discovery.models import GovernmentLevel
+                        discovery_result = type('MockResult', (), {'priority_ranking': []})()
+                        
+                        for item in search_results:
+                            url = item.get("url", "")
+                            if any(domain in url for domain in ["congress.gov", "regulations.gov"]):
+                                level = GovernmentLevel.FEDERAL
+                            elif any(domain in url for domain in ["ca.gov", "calmatters"]):
+                                level = GovernmentLevel.STATE  
+                            elif any(domain in url for domain in ["sf.gov", "sfplanning"]):
+                                level = GovernmentLevel.LOCAL
+                            else:
+                                level = GovernmentLevel.FEDERAL
                                 
+                            policy = policy_discovery_agent._create_policy_result(item, level)
+                            if policy:
+                                discovery_result.priority_ranking.append(policy)
+                        
+                        for policy_result in discovery_result.priority_ranking[:max_results]:
+                            local_policies.append({
+                                "id": policy_result.url.split("/")[-1] or f"discovered_{len(local_policies)}",
+                                "title": policy_result.title,
+                                "summary": policy_result.summary,
+                                "date": policy_result.last_updated.isoformat() if policy_result.last_updated else "Unknown",
+                                "url": policy_result.url,
+                                "government_level": policy_result.government_level.value,
+                                "domain": policy_result.domain.value,
+                                "relevance_score": policy_result.confidence_score,
+                                "matched_keywords": keywords
+                            })
+                        
+                        if local_policies:
+                            # Skip fallback if we found policies via discovery
+                            yield f"data: {json.dumps({'type': 'status', 'message': f'Found {len(local_policies)} policies via discovery', 'step': 3, 'total_steps': 4})}\n\n"
+                            await asyncio.sleep(0.1)
+                        
+                    except Exception as e:
+                        logger.error(f"Policy discovery search failed: {e}")
+                
+                # Fallback to test data if discovery didn't find anything or failed
+                if not local_policies:
+                    test_data_dir = project_root / "test_data"
+                    if test_data_dir.exists():
+                        for file in test_data_dir.glob("*.json"):
+                            policy_name = file.stem
+                            try:
+                                policy_data = load_policy_data_fallback(policy_name)
+                                
+                                # Enhanced search logic - search in title, summary, and policy text
+                                search_text = f"{policy_data['title']} {policy_data['summary']} {policy_data['text'][:2000]}".lower()
+                                
+                                # Calculate relevance score based on keyword matches
+                                relevance_score = 0.0
+                                matched_keywords = []
+                                
+                                for keyword in keywords:
+                                    if keyword in search_text:
+                                        matched_keywords.append(keyword)
+                                        # Higher score for matches in title
+                                        if keyword in policy_data["title"].lower():
+                                            relevance_score += 0.4
+                                        # Medium score for matches in policy text
+                                        elif keyword in policy_data["text"].lower():
+                                            relevance_score += 0.2
+                                        # Lower score for matches in summary
+                                        elif keyword in policy_data["summary"].lower():
+                                            relevance_score += 0.1
+                                
+                                # Determine if we should include this policy
+                                should_include = False
+                                
+                                # Include if we have keyword matches
+                                if matched_keywords:
+                                    should_include = True
+                                # Include if no keywords provided (broad search)
+                                elif len(keywords) == 0:
+                                    should_include = True
+                                    relevance_score = 0.5  # Default relevance for broad search
+                                # Include if all keywords are too short (like "policy", "sf", etc.)
+                                elif len([k for k in keywords if len(k) > 2]) == 0:
+                                    should_include = True
+                                    relevance_score = 0.4  # Lower relevance for short keywords
+                                
+                                if should_include:
+                                    # Generate a better summary from the policy text
+                                    policy_text = policy_data["text"]
+                                    summary = policy_data["summary"]
+                                    if summary == "No summary available" and policy_text:
+                                        # Extract first meaningful sentence or paragraph
+                                        sentences = policy_text.split('.')[:3]
+                                        summary = '. '.join(sentences).strip()
+                                        if len(summary) > 200:
+                                            summary = summary[:197] + "..."
+                                    
+                                    local_policies.append({
+                                        "id": policy_name,
+                                        "title": policy_data["title"],
+                                        "summary": summary,
+                                        "date": policy_data["date"],
+                                        "url": f"/policies/{policy_name}",
+                                        "government_level": "local",
+                                        "domain": "general",
+                                        "relevance_score": max(0.3, relevance_score),  # Minimum relevance score
+                                        "matched_keywords": matched_keywords
+                                    })
+                            except Exception as e:
+                                logger.error(f"Error loading policy {policy_name}: {e}")
+                                # Try to add a basic entry even if loading fails
                                 local_policies.append({
                                     "id": policy_name,
-                                    "title": policy_data["title"],
-                                    "summary": summary,
-                                    "date": policy_data["date"],
+                                    "title": f"Policy {policy_name}",
+                                    "summary": "Policy details unavailable",
+                                    "date": "Unknown",
                                     "url": f"/policies/{policy_name}",
                                     "government_level": "local",
                                     "domain": "general",
-                                    "relevance_score": max(0.3, relevance_score),  # Minimum relevance score
-                                    "matched_keywords": matched_keywords
+                                    "relevance_score": 0.3,
+                                    "matched_keywords": []
                                 })
-                        except Exception as e:
-                            logger.error(f"Error loading policy {policy_name}: {e}")
-                            # Try to add a basic entry even if loading fails
-                            local_policies.append({
-                                "id": policy_name,
-                                "title": f"Policy {policy_name}",
-                                "summary": "Policy details unavailable",
-                                "date": "Unknown",
-                                "url": f"/policies/{policy_name}",
-                                "government_level": "local",
-                                "domain": "general",
-                                "relevance_score": 0.3,
-                                "matched_keywords": []
-                            })
                 
                 # Step 2: Use crew system for advanced search if available
                 yield f"data: {json.dumps({'type': 'status', 'message': 'Analyzing policy relevance...', 'step': 3, 'total_steps': 4})}\n\n"
@@ -623,33 +890,35 @@ async def search_policies_stream(request: Request):
                 await asyncio.sleep(0.1)
                 
                 # If no policies were found but we have files, include all policies with low relevance
-                if not local_policies and test_data_dir.exists():
-                    for file in test_data_dir.glob("*.json"):
-                        policy_name = file.stem
-                        try:
-                            policy_data = load_policy_data(policy_name)
-                            # Generate a better summary from the policy text
-                            policy_text = policy_data["text"]
-                            summary = policy_data["summary"]
-                            if summary == "No summary available" and policy_text:
-                                sentences = policy_text.split('.')[:3]
-                                summary = '. '.join(sentences).strip()
-                                if len(summary) > 200:
-                                    summary = summary[:197] + "..."
-                            
-                            local_policies.append({
-                                "id": policy_name,
-                                "title": policy_data["title"],
-                                "summary": summary,
-                                "date": policy_data["date"],
-                                "url": f"/policies/{policy_name}",
-                                "government_level": "local",
-                                "domain": "general",
-                                "relevance_score": 0.3,
-                                "matched_keywords": []
-                            })
-                        except Exception as e:
-                            logger.error(f"Error loading policy {policy_name} in fallback: {e}")
+                if not local_policies:
+                    test_data_dir = project_root / "test_data"
+                    if test_data_dir.exists():
+                        for file in test_data_dir.glob("*.json"):
+                            policy_name = file.stem
+                            try:
+                                policy_data = load_policy_data_fallback(policy_name)
+                                # Generate a better summary from the policy text
+                                policy_text = policy_data["text"]
+                                summary = policy_data["summary"]
+                                if summary == "No summary available" and policy_text:
+                                    sentences = policy_text.split('.')[:3]
+                                    summary = '. '.join(sentences).strip()
+                                    if len(summary) > 200:
+                                        summary = summary[:197] + "..."
+                                
+                                local_policies.append({
+                                    "id": policy_name,
+                                    "title": policy_data["title"],
+                                    "summary": summary,
+                                    "date": policy_data["date"],
+                                    "url": f"/policies/{policy_name}",
+                                    "government_level": "local",
+                                    "domain": "general",
+                                    "relevance_score": 0.3,
+                                    "matched_keywords": []
+                                })
+                            except Exception as e:
+                                logger.error(f"Error loading policy {policy_name} in fallback: {e}")
                 
                 # Sort policies by relevance score (highest first)
                 local_policies.sort(key=lambda x: x["relevance_score"], reverse=True)
@@ -697,7 +966,9 @@ async def get_crew_system_status():
                 "crew_system": crew_system is not None,
                 "debug_system": debug_system is not None,
                 "weave_system": weave_system is not None,
-                "human_system": human_system is not None
+                "human_system": human_system is not None,
+                "policy_discovery_agent": policy_discovery_agent is not None,
+                "a2a_protocol": is_a2a_available()
             }
         }
         return status
@@ -708,6 +979,63 @@ async def get_crew_system_status():
             "message": f"Error checking status: {str(e)}",
             "components": {}
         }
+
+@app.get("/debates/{session_id}/a2a-info")
+async def get_a2a_session_info(session_id: str):
+    """Get A2A protocol session information"""
+    try:
+        coordinator = get_coordinator(session_id)
+        session_info = coordinator.get_session_info()
+        return {
+            "success": True,
+            "session_info": session_info,
+            "a2a_available": is_a2a_available()
+        }
+    except Exception as e:
+        logger.error(f"Error getting A2A session info for {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/debates/{session_id}/a2a-message")
+async def send_a2a_message(session_id: str, request: Dict[str, Any]):
+    """Send message via A2A protocol"""
+    try:
+        sender_id = request.get("sender_id")
+        recipient_id = request.get("recipient_id")
+        content = request.get("content")
+        message_type = request.get("message_type", "direct")
+        metadata = request.get("metadata", {})
+        
+        if not all([sender_id, content]):
+            raise HTTPException(status_code=400, detail="sender_id and content are required")
+        
+        coordinator = get_coordinator(session_id)
+        
+        if recipient_id:
+            # Direct message
+            success = await coordinator.send_direct_message(
+                sender_id=sender_id,
+                recipient_id=recipient_id,
+                content=content,
+                message_type=message_type,
+                metadata=metadata
+            )
+        else:
+            # Broadcast message
+            success = await coordinator.broadcast_message(
+                sender_id=sender_id,
+                content=content,
+                message_type=message_type,
+                metadata=metadata
+            )
+        
+        return {
+            "success": success,
+            "message": "Message sent successfully" if success else "Failed to send message"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error sending A2A message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
