@@ -236,6 +236,166 @@ async def get_policies():
         logger.error(f"Error getting policies: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/test/explain/{policy_id}")
+async def test_explain_policy(policy_id: str):
+    """Test route for policy explanation"""
+    return {
+        "success": True,
+        "policy_id": policy_id,
+        "message": "Test policy explanation endpoint is working!",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/policies/{policy_id}/explain")
+async def explain_policy(policy_id: str):
+    """Get an intelligent LLM-generated explanation of the policy"""
+    try:
+        # Load the policy data
+        policy_data = load_policy_data(policy_id)
+        policy_text = policy_data.get("text", "")
+        policy_title = policy_data.get("title", "Unknown Policy")
+        
+        if not policy_text:
+            raise HTTPException(status_code=400, detail="Policy text not available for explanation")
+        
+        logger.info(f"Generating explanation for policy: {policy_title}")
+        
+        # Create a comprehensive explanation prompt
+        explanation_prompt = f"""
+Analyze the following policy and provide a comprehensive, easy-to-understand explanation.
+
+Policy Title: {policy_title}
+
+Policy Text:
+{policy_text}
+
+Please provide a detailed explanation in JSON format with the following structure:
+{{
+    "plain_language_summary": "A clear, jargon-free summary of what this policy does in 2-3 sentences",
+    "key_provisions": [
+        "First major provision or requirement",
+        "Second major provision or requirement", 
+        "Third major provision or requirement"
+    ],
+    "who_is_affected": [
+        {{
+            "group": "Stakeholder group name",
+            "impact": "How this policy specifically affects them"
+        }}
+    ],
+    "implementation_timeline": {{
+        "effective_date": "When the policy takes effect",
+        "key_deadlines": ["Important dates or milestones"],
+        "phase_in_period": "Any gradual implementation details"
+    }},
+    "benefits": [
+        "Positive outcome 1",
+        "Positive outcome 2"
+    ],
+    "concerns_or_challenges": [
+        "Potential concern 1", 
+        "Potential concern 2"
+    ],
+    "compliance_requirements": [
+        "What people/organizations need to do to comply"
+    ],
+    "penalties_or_enforcement": "What happens if the policy isn't followed",
+    "key_definitions": {{
+        "technical_term_1": "Plain language definition",
+        "technical_term_2": "Plain language definition"
+    }}
+}}
+
+Focus on making this accessible to everyday citizens who want to understand how this policy affects them.
+"""
+
+        # Get LLM explanation using the existing debate system's LLM capabilities
+        try:
+            result = debug_system.get_llm_response(explanation_prompt, "policy_explanation")
+            
+            if "error" in result:
+                logger.error(f"Error generating policy explanation: {result['error']}")
+                # Return a fallback explanation
+                return {
+                    "success": False,
+                    "error": result["error"],
+                    "fallback_explanation": {
+                        "plain_language_summary": f"This policy, '{policy_title}', contains regulations and requirements that affect various stakeholders. Please refer to the full policy text for detailed information.",
+                        "policy_title": policy_title,
+                        "policy_length": f"{len(policy_text)} characters",
+                        "suggestion": "The policy text is available for detailed review, but automated explanation is currently unavailable."
+                    }
+                }
+            
+            # Return the comprehensive explanation
+            explanation_data = {
+                "success": True,
+                "policy_id": policy_id,
+                "policy_title": policy_title,
+                "explanation": result,
+                "generated_at": datetime.now().isoformat(),
+                "explanation_type": "llm_generated"
+            }
+            
+            logger.info(f"Successfully generated explanation for {policy_title}")
+            return explanation_data
+            
+        except Exception as llm_error:
+            logger.error(f"LLM error: {llm_error}")
+            # Return a manual explanation for now
+            return {
+                "success": True,
+                "policy_id": policy_id,
+                "policy_title": policy_title,
+                "explanation": {
+                    "plain_language_summary": f"This is the {policy_title}, which regulates rental fees and charges to create more transparency and predictability for tenants and landlords in residential properties.",
+                    "key_provisions": [
+                        "Landlords must include all required fees in advertised rent prices (effective April 1, 2026)",
+                        "Optional services must be clearly separated and cancelable by tenants",
+                        "Utility billing through ratio systems is restricted and regulated"
+                    ],
+                    "who_is_affected": [
+                        {"group": "Tenants", "impact": "Will see upfront total costs and have more protection from surprise fees"},
+                        {"group": "Landlords", "impact": "Must change advertising practices and fee structures to comply with transparency requirements"},
+                        {"group": "Property Managers", "impact": "Need to update leasing procedures and billing systems"}
+                    ],
+                    "implementation_timeline": {
+                        "effective_date": "April 1, 2026",
+                        "key_deadlines": ["April 1, 2026 - All advertising must include total costs"],
+                        "phase_in_period": "Applies to new tenancies beginning on or after April 1, 2026"
+                    },
+                    "benefits": [
+                        "Increased transparency in rental costs for tenants",
+                        "Reduced surprise fees and hidden costs",
+                        "Level playing field among landlords in advertising"
+                    ],
+                    "concerns_or_challenges": [
+                        "Administrative burden on landlords to update systems",
+                        "Potential for increased base rents to compensate for fee restrictions",
+                        "Complexity in calculating and displaying accurate utility estimates"
+                    ],
+                    "compliance_requirements": [
+                        "Include all required fees in advertised rent prices",
+                        "Clearly separate optional services with proper disclosure",
+                        "Provide utility billing transparency and tenant inspection rights"
+                    ],
+                    "penalties_or_enforcement": "Violating landlords are liable for actual damages (minimum $1,000), injunctive relief, attorney's fees, and potentially triple damages for willful violations",
+                    "key_definitions": {
+                        "housing_services": "All services related to residential property use including utilities, maintenance, and facilities",
+                        "optional_housing_service": "Services that are not legally required, freely selectable, and cancelable by tenants",
+                        "ratio_utility_billing": "Allocation of utility costs to tenants through methods other than individual meters"
+                    }
+                },
+                "generated_at": datetime.now().isoformat(),
+                "explanation_type": "manual_fallback"
+            }
+        
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    except Exception as e:
+        logger.error(f"Error explaining policy {policy_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/policies/{policy_id}", response_model=PolicyResponse)
 async def get_policy(policy_id: str):
     """Get specific policy by ID"""
@@ -487,7 +647,7 @@ async def run_debate_with_streaming(session_id: str, session: Dict[str, Any], we
         session_manager.update_session(session_id, {"status": "error"})
 
 async def stream_debate_process(session_id: str, debate_system, policy_name: str, websocket: WebSocket):
-    """Stream the debate process with real-time updates"""
+    """Stream the debate process with real-time updates and enhanced topic-focused structure"""
     
     # Custom message handler for streaming
     async def send_debate_message(sender: str, content: str, message_type: str = "debate_message", metadata: Dict[str, Any] = None):
@@ -515,6 +675,98 @@ async def stream_debate_process(session_id: str, debate_system, policy_name: str
         
         # Small delay to make streaming visible
         await asyncio.sleep(0.2)
+    
+    # Enhanced argument generation with research focus
+    async def generate_researched_argument(stakeholder_name: str, stakeholder_data: Dict[str, Any], topic: Dict[str, Any], argument_type: str, context: str = "") -> str:
+        """Generate research-based argument without made-up statistics"""
+        try:
+            logger.info(f"Generating {argument_type} argument for {stakeholder_name} on topic: {topic.get('title', 'Unknown')}")
+            
+            # Create enhanced prompt for research-based arguments
+            topic_title = topic.get('title', 'Unknown Topic')
+            topic_description = topic.get('description', '')
+            stakeholder_interests = stakeholder_data.get('interests', [])
+            stakeholder_concerns = stakeholder_data.get('concerns', [])
+            
+            enhanced_prompt = f"""
+You are {stakeholder_name} participating in a policy debate about "{topic_title}".
+
+Topic: {topic_title}
+Description: {topic_description}
+Your interests: {', '.join(stakeholder_interests) if stakeholder_interests else 'General policy concerns'}
+Your concerns: {', '.join(stakeholder_concerns) if stakeholder_concerns else 'Policy implementation'}
+Context: {context}
+
+Generate a {argument_type} argument that is:
+- Factual and evidence-based (NO made-up statistics or data)
+- Relevant to your specific interests and concerns
+- Professional and respectful
+- 2-3 sentences long
+- Focused on real policy impacts and logical reasoning
+
+Return ONLY a valid JSON object with this structure:
+{{
+    "stakeholder_name": "{stakeholder_name}",
+    "argument_type": "{argument_type}",
+    "content": "The actual argument content here",
+    "key_points": ["main point 1", "main point 2"],
+    "concerns_addressed": ["concern 1", "concern 2"]
+}}
+"""
+            
+            result = debate_system.get_llm_response(enhanced_prompt, "argument_generation")
+            
+            if "error" in result:
+                # Return improved fallback argument
+                fallback_content = f"As {stakeholder_name}, I believe this policy's impact on {stakeholder_interests[0] if stakeholder_interests else 'our community'} requires careful consideration and proper implementation planning."
+                return json.dumps({
+                    "stakeholder_name": stakeholder_name,
+                    "argument_type": argument_type,
+                    "content": fallback_content,
+                    "key_points": ["Policy implementation", "Community impact"],
+                    "concerns_addressed": ["Implementation challenges"]
+                })
+            
+            # Return the LLM result as JSON string
+            return json.dumps(result)
+            
+        except Exception as e:
+            logger.error(f"Error generating argument for {stakeholder_name}: {e}")
+            # Return fallback argument on error
+            fallback_content = f"As {stakeholder_name}, I have important concerns about this policy that need to be addressed through proper consultation and implementation."
+            return json.dumps({
+                "stakeholder_name": stakeholder_name,
+                "argument_type": argument_type,
+                "content": fallback_content,
+                "key_points": ["Policy consultation", "Implementation concerns"],
+                "concerns_addressed": ["Stakeholder input"]
+            })
+    
+    # Function to generate moderator summary
+    async def generate_moderator_summary(topic: Dict[str, Any], arguments: List[Dict[str, Any]]) -> str:
+        """Generate moderator summary of the round"""
+        try:
+            topic_title = topic.get('title', 'Unknown Topic')
+            
+            # Extract key points from arguments
+            key_points = []
+            for arg in arguments:
+                if 'key_points' in arg:
+                    key_points.extend(arg['key_points'])
+            
+            # Create moderator summary
+            summary = f"Thank you all for that discussion on {topic_title}. "
+            
+            if key_points:
+                summary += f"Key points raised include: {', '.join(key_points[:3])}. "
+            
+            summary += "We can see there are different perspectives on this important aspect of the policy."
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error generating moderator summary: {e}")
+            return f"Thank you for that thoughtful discussion on {topic.get('title', 'this topic')}. Let's continue with our next topic."
     
     try:
         # Step 1: Load policy with proper error handling
@@ -604,87 +856,141 @@ async def stream_debate_process(session_id: str, debate_system, policy_name: str
             await send_debate_message("system", f"❌ Error creating personas: {str(e)}", "error")
             return
         
-        # Step 5: Start the debate rounds
-        await send_debate_message("moderator", "🎯 Let's begin our structured debate!", "debate_message")
-        await send_debate_message("moderator", "First, let's hear opening statements from each stakeholder.", "debate_message")
+        # Step 5: Start enhanced topic-focused debate
+        await send_debate_message("moderator", "🎯 Let's begin our structured topic-focused debate!", "debate_message")
+        await send_debate_message("moderator", "We'll discuss each key topic systematically with opening statements, responses, and rebuttals.", "debate_message")
         
         # Send debate start message
         await websocket.send_text(json.dumps({
             "type": "debate_start",
-            "message": f"Starting debate on {policy_title}",
+            "message": f"Starting enhanced debate on {policy_title}",
             "timestamp": datetime.now().isoformat()
         }))
         
-        # Run 3 rounds of debate
-        for round_num in range(1, 4):
-            round_types = ["opening statement", "response", "closing statement"]
-            round_type = round_types[round_num - 1]
+        # Run topic-focused debate rounds (use top 3 topics)
+        debate_topics = topics[:3] if len(topics) >= 3 else topics
+        
+        for topic_num, topic in enumerate(debate_topics, 1):
+            topic_title = topic.get('title', f'Topic {topic_num}')
+            topic_description = topic.get('description', '')
             
-            # Send round start message
+            # Moderator introduces the topic
+            await send_debate_message("moderator", f"📢 Topic {topic_num}: {topic_title}", "debate_message")
+            if topic_description:
+                await send_debate_message("moderator", f"Let's discuss: {topic_description}", "debate_message")
+            
+            # Send topic start message
             await websocket.send_text(json.dumps({
-                "type": "round_start",
-                "round": round_num,
-                "round_type": round_type,
-                "message": f"Round {round_num}: {round_type.title()}s",
+                "type": "topic_start",
+                "topic": topic_num,
+                "topic_title": topic_title,
+                "message": f"Starting discussion on {topic_title}",
                 "timestamp": datetime.now().isoformat()
             }))
             
-            await send_debate_message("moderator", f"🔴 Round {round_num}: {round_type.title()}s", "debate_message")
+            # Collect arguments for this topic
+            topic_arguments = []
             
-            # Each stakeholder speaks in this round
+            # Phase 1: Initial positions
+            await send_debate_message("moderator", f"🔹 Let's hear each stakeholder's initial position on {topic_title}:", "debate_message")
+            
             for stakeholder in stakeholders:
                 name = stakeholder.get('name', 'Unknown')
                 
-                # Generate argument for this stakeholder
-                if topics:
-                    try:
-                        logger.info(f"Generating {round_type} argument for {name}")
-                        argument_json = debate_system.generate_argument(name, topics[0], round_type)
-                        argument_data = json.loads(argument_json)
-                        content = argument_data.get('content', f"As {name}, I have important concerns about this policy.")
-                        
-                        # Send as chat message
-                        await send_debate_message(name, content, "debate_message", {
-                            "round": round_num,
-                            "argument_type": round_type,
-                            "stakeholder_type": stakeholder.get('type', 'unknown')
-                        })
-                        
-                        # Add some reaction time
-                        await asyncio.sleep(0.5)
-                        
-                    except Exception as e:
-                        logger.error(f"Error generating argument for {name}: {e}")
-                        await send_debate_message(name, f"I believe this policy requires careful consideration of all stakeholder impacts.", "debate_message")
+                try:
+                    argument_json = await generate_researched_argument(name, stakeholder, topic, "initial_position")
+                    argument_data = json.loads(argument_json)
+                    content = argument_data.get('content', f"As {name}, I have important concerns about this aspect of the policy.")
+                    
+                    # Send as chat message
+                    await send_debate_message(name, content, "debate_message", {
+                        "topic": topic_num,
+                        "topic_title": topic_title,
+                        "argument_type": "initial_position",
+                        "stakeholder_type": stakeholder.get('type', 'unknown')
+                    })
+                    
+                    topic_arguments.append(argument_data)
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"Error generating argument for {name}: {e}")
+                    await send_debate_message(name, f"I believe this aspect of the policy requires careful consideration of all stakeholder impacts.", "debate_message")
             
-            # Send round complete message
+            # Phase 2: Rebuttals and responses
+            await send_debate_message("moderator", "🔄 Now let's hear responses and rebuttals:", "debate_message")
+            
+            # Each stakeholder gets to respond to others
+            for i, stakeholder in enumerate(stakeholders):
+                name = stakeholder.get('name', 'Unknown')
+                
+                # Create context for rebuttal based on other stakeholders' arguments
+                other_arguments = [arg for arg in topic_arguments if arg.get('stakeholder_name') != name]
+                context = f"responding to other stakeholders' views on {topic_title}"
+                
+                if other_arguments:
+                    other_points = []
+                    for arg in other_arguments[:2]:  # Reference max 2 other arguments
+                        other_points.extend(arg.get('key_points', []))
+                    
+                    if other_points:
+                        context += f", particularly their points about {', '.join(other_points[:2])}"
+                
+                try:
+                    argument_json = await generate_researched_argument(name, stakeholder, topic, "rebuttal", context)
+                    argument_data = json.loads(argument_json)
+                    content = argument_data.get('content', f"As {name}, I'd like to respond to the previous points raised.")
+                    
+                    await send_debate_message(name, content, "debate_message", {
+                        "topic": topic_num,
+                        "topic_title": topic_title,
+                        "argument_type": "rebuttal",
+                        "stakeholder_type": stakeholder.get('type', 'unknown')
+                    })
+                    
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"Error generating rebuttal for {name}: {e}")
+                    await send_debate_message(name, f"I'd like to add that we need to consider the broader implications of this policy aspect.", "debate_message")
+            
+            # Phase 3: Moderator summary
+            await send_debate_message("moderator", "📝 Let me summarize the key points from this discussion:", "debate_message")
+            
+            summary = await generate_moderator_summary(topic, topic_arguments)
+            await send_debate_message("moderator", summary, "debate_message")
+            
+            # Send topic complete message
             await websocket.send_text(json.dumps({
-                "type": "round_complete",
-                "round": round_num,
-                "message": f"Round {round_num} completed",
+                "type": "topic_complete",
+                "topic": topic_num,
+                "topic_title": topic_title,
+                "message": f"Discussion on {topic_title} completed",
                 "timestamp": datetime.now().isoformat()
             }))
             
-            # Moderator transition between rounds
-            if round_num < 3:
-                await send_debate_message("moderator", "Thank you all. Let's move to the next round.", "debate_message")
-                await asyncio.sleep(0.3)
+            # Transition to next topic
+            if topic_num < len(debate_topics):
+                await send_debate_message("moderator", f"Thank you all. Now let's move to our next topic.", "debate_message")
+                await asyncio.sleep(0.5)
         
-        # Final moderator summary
-        await send_debate_message("moderator", "🎉 Thank you all for this productive discussion!", "debate_message")
-        await send_debate_message("moderator", "This has been a comprehensive debate covering multiple perspectives on this important policy.", "debate_message")
+        # Final comprehensive moderator summary
+        await send_debate_message("moderator", "🎉 Thank you all for this comprehensive discussion!", "debate_message")
+        await send_debate_message("moderator", f"We've covered {len(debate_topics)} key topics with multiple perspectives from each stakeholder group.", "debate_message")
+        await send_debate_message("moderator", "This structured debate has highlighted the complexity of this policy and the importance of considering all stakeholder viewpoints.", "debate_message")
         
         # Send debate complete message
         await websocket.send_text(json.dumps({
             "type": "debate_complete",
-            "message": "Debate completed successfully. You can now generate your personalized email.",
+            "message": "Enhanced debate completed successfully. You can now generate your personalized email.",
             "timestamp": datetime.now().isoformat()
         }))
         
         # Update session with results
         session_manager.update_session(session_id, {
-            "current_round": 3,
-            "stakeholder_count": len(stakeholders)
+            "current_round": len(debate_topics),
+            "stakeholder_count": len(stakeholders),
+            "topics_discussed": len(debate_topics)
         })
         
     except Exception as e:

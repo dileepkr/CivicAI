@@ -162,6 +162,12 @@ Return ONLY a valid JSON object with this structure:
     ]
 }}
 """
+                elif analysis_type == "policy_explanation":
+                    formatted_prompt = f"""
+{prompt}
+
+You are an expert policy analyst. Provide a comprehensive, citizen-friendly explanation that helps ordinary people understand this policy's real-world impact. Use clear, accessible language and avoid legal jargon. Return ONLY valid JSON with no markdown formatting.
+"""
                 elif analysis_type == "argument_generation":
                     formatted_prompt = prompt  # For argument generation, the prompt is already formatted
                 else:
@@ -338,45 +344,52 @@ Return ONLY a valid JSON object with this structure:
         return stakeholder_research
     
     def generate_argument(self, stakeholder_name: str, topic: Dict[str, Any], argument_type: str) -> str:
-        """Generate argument for a stakeholder on a topic using proper LLM"""
+        """Generate research-based argument for a stakeholder on a topic using proper LLM"""
         try:
-            # Create argument prompt
+            # Create enhanced argument prompt
             topic_title = topic.get('title', 'Unknown Topic')
             topic_description = topic.get('description', '')
             
+            # Enhanced prompt with explicit research-based instructions
             prompt = f"""
 You are representing {stakeholder_name} in a policy debate about "{topic_title}".
 
 Topic: {topic_title}
 Description: {topic_description}
 
-Generate a {argument_type} argument from {stakeholder_name}'s perspective. The argument should be:
-- Factual and evidence-based
-- Relevant to their interests and concerns
-- Professional and respectful
+Generate a {argument_type} argument from {stakeholder_name}'s perspective. The argument MUST be:
+- Factual and evidence-based (NO made-up statistics, data, or research citations)
+- Based on logical reasoning and real-world policy implications
+- Relevant to their likely interests and concerns as this stakeholder group
+- Professional, respectful, and substantive
 - 2-3 sentences long
+- Focused on actual policy impacts rather than speculative numbers
+
+IMPORTANT: Do NOT include any specific statistics, percentages, dollar amounts, or research citations unless they are widely known public facts. Focus on logical arguments about policy impacts, implementation challenges, and stakeholder concerns.
 
 Return ONLY a valid JSON object with this structure:
 {{
     "stakeholder_name": "{stakeholder_name}",
     "argument_type": "{argument_type}",
-    "content": "The actual argument content here",
-    "strength": 7,
-    "evidence": ["Supporting evidence 1", "Supporting evidence 2"]
+    "content": "The actual argument content here (no made-up statistics)",
+    "key_points": ["main concern 1", "main concern 2"],
+    "reasoning": "The logical basis for this argument",
+    "concerns_addressed": ["specific concern 1", "specific concern 2"]
 }}
 """
             
             result = self.get_llm_response(prompt, "argument_generation")
             
             if "error" in result:
-                # Return fallback argument
-                fallback_content = f"As {stakeholder_name}, I believe this policy requires careful consideration of all stakeholder impacts and proper implementation planning."
+                # Return improved fallback argument
+                fallback_content = f"As {stakeholder_name}, I believe this policy's implementation requires careful consideration of how it will affect our community, including proper consultation with affected parties and clear guidelines for compliance."
                 return json.dumps({
                     "stakeholder_name": stakeholder_name,
                     "argument_type": argument_type,
                     "content": fallback_content,
-                    "strength": 6,
-                    "evidence": ["Stakeholder analysis", "Policy review"]
+                    "key_points": ["Community impact", "Implementation planning"],
+                    "reasoning": "Policy changes require stakeholder consultation and clear implementation frameworks",
+                    "concerns_addressed": ["Community consultation", "Implementation clarity"]
                 })
             
             # Return the LLM result as JSON string
@@ -384,13 +397,14 @@ Return ONLY a valid JSON object with this structure:
             
         except Exception as e:
             # Return fallback argument on error
-            fallback_content = f"As {stakeholder_name}, I have important concerns about this policy that need to be addressed."
+            fallback_content = f"As {stakeholder_name}, I have important concerns about this policy that need to be addressed through proper consultation and transparent implementation processes."
             return json.dumps({
                 "stakeholder_name": stakeholder_name,
                 "argument_type": argument_type,
                 "content": fallback_content,
-                "strength": 5,
-                "evidence": ["Policy analysis"]
+                "key_points": ["Policy consultation", "Implementation transparency"],
+                "reasoning": "Effective policy implementation requires stakeholder input and clear processes",
+                "concerns_addressed": ["Stakeholder input", "Process transparency"]
             })
     
     def send_a2a_message(self, sender: str, receiver: str, message_type: str, content: str, context: Dict[str, Any]) -> str:
