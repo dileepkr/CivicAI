@@ -14,11 +14,11 @@ from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
 from functools import wraps
 
-# Disable Weave completely to prevent circular reference issues
-os.environ['WEAVE_DISABLE_TRACING'] = '1'
-os.environ['WEAVE_AUTO_TRACE'] = '0'
-os.environ['WEAVE_AUTO_PATCH'] = '0'
-os.environ['WANDB_DISABLE_TRACING'] = '1'
+# Enable Weave tracing - comment out to disable if needed
+# os.environ['WEAVE_DISABLE_TRACING'] = '1'
+# os.environ['WEAVE_AUTO_TRACE'] = '0'
+# os.environ['WEAVE_AUTO_PATCH'] = '0'
+# os.environ['WANDB_DISABLE_TRACING'] = '1'
 
 try:
     from dotenv import load_dotenv
@@ -32,6 +32,9 @@ except ImportError:
 try:
     import weave
     WEAVE_AVAILABLE = True
+    # Initialize weave with project name
+    weave.init("civicai-policy-debate")
+    print("✅ Weave tracing initialized successfully")
 except ImportError:
     WEAVE_AVAILABLE = False
     print("⚠️  Weave not available for inference - install with: pip install weave")
@@ -277,6 +280,7 @@ class RobustLLMClient:
             # Other errors
             raise Exception(f"Provider {provider['name']} error: {e}")
     
+    @weave.op() if WEAVE_AVAILABLE else lambda x: x
     def generate_text(
         self, 
         prompt: str, 
@@ -337,6 +341,7 @@ class RobustLLMClient:
         # All retries failed
         raise RuntimeError(f"Text generation failed after {retries} attempts. Last error: {last_error}")
     
+    @weave.op() if WEAVE_AVAILABLE else lambda x: x
     def generate_json(
         self, 
         prompt: str, 
@@ -412,6 +417,7 @@ Please respond with valid JSON only. Do not include any explanation or markdown 
                 "raw_response": ""
             }
     
+    @weave.op() if WEAVE_AVAILABLE else lambda x: x
     def analyze_policy(
         self, 
         policy_text: str, 
