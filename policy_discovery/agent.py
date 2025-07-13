@@ -5,7 +5,7 @@ Core PolicyDiscoveryAgent implementation using CrewAI framework
 import asyncio
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict
 
 from crewai import Agent
 from exa_py import Exa
@@ -33,6 +33,7 @@ from .models import (
 )
 from .search import PolicySearchEngine
 from .utils import PolicyClassifier, StakeholderAnalyzer
+from .webset_manager import WebsetManager
 
 
 class PolicyDiscoveryAgent:
@@ -53,8 +54,12 @@ class PolicyDiscoveryAgent:
 
         self.exa = Exa(api_key=self.exa_api_key)
         self.search_engine = PolicySearchEngine(self.exa)
+        self.webset_manager = WebsetManager(self.exa)
         self.classifier = PolicyClassifier()
         self.stakeholder_analyzer = StakeholderAnalyzer()
+        
+        # Track initialization status
+        self._websets_initialized = False
 
         # Set up logging
         logging.basicConfig(level=logging.INFO)
@@ -88,57 +93,52 @@ class PolicyDiscoveryAgent:
         user_context: UserContext,
         domains: list[PolicyDomain] | None = None,
         government_levels: list[GovernmentLevel] | None = None,
+        use_websets: bool = True,
     ) -> PolicyDiscoveryResult:
         """
-        Main policy discovery method
+        Main policy discovery method using hybrid Webset + Search approach
 
         Args:
             user_context: User context for personalized search
             domains: Specific policy domains to search (optional)
             government_levels: Specific government levels to search (optional)
+            use_websets: Whether to include webset results (default: True)
 
         Returns:
             PolicyDiscoveryResult with discovered policies
         """
         start_time = datetime.now()
 
-        # Generate search parameters
-        search_params = self._generate_search_parameters(
+        # Initialize websets if not already done and websets are enabled
+        if use_websets and not self._websets_initialized:
+            try:
+                await self.initialize_websets()
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize websets, continuing with search only: {e}")
+                use_websets = False
+
+        # 1. Get policies from websets (structured collection)
+        webset_policies = []
+        if use_websets:
+            try:
+                webset_policies = await self.webset_manager.query_websets(user_context)
+                self.logger.info(f"Retrieved {len(webset_policies)} policies from websets")
+            except Exception as e:
+                self.logger.warning(f"Failed to query websets: {e}")
+
+        # 2. Get real-time policies from search API
+        search_policies = await self._execute_live_search(
             user_context, domains, government_levels
         )
+        self.logger.info(f"Retrieved {len(search_policies)} policies from live search")
 
-        # Execute searches across government levels
-        search_tasks = []
-        levels_to_search = government_levels or list(GovernmentLevel)
-
-        for level in levels_to_search:
-            task = self._search_government_level(level, search_params)
-            search_tasks.append(task)
-
-        # Execute searches concurrently
-        search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-
-        # Process and organize results
-        federal_policies = []
-        state_policies = []
-        local_policies = []
-
-        for i, result in enumerate(search_results):
-            if isinstance(result, Exception):
-                self.logger.error(f"Search failed for {levels_to_search[i]}: {result}")
-                continue
-
-            level = levels_to_search[i]
-            if level == GovernmentLevel.FEDERAL:
-                federal_policies = result
-            elif level == GovernmentLevel.STATE:
-                state_policies = result
-            elif level == GovernmentLevel.LOCAL:
-                local_policies = result
-
-        # Combine and deduplicate policies
-        all_policies = federal_policies + state_policies + local_policies
-        all_policies = self._deduplicate_policies(all_policies)
+        # 3. Combine and deduplicate results
+        all_policies = self._combine_webset_and_search_results(webset_policies, search_policies)
+        
+        # Organize policies by government level
+        federal_policies = [p for p in all_policies if p.government_level == GovernmentLevel.FEDERAL]
+        state_policies = [p for p in all_policies if p.government_level == GovernmentLevel.STATE]
+        local_policies = [p for p in all_policies if p.government_level == GovernmentLevel.LOCAL]
         
         # Generate stakeholder impact mapping
         stakeholder_impact_map = self._create_stakeholder_impact_map(
@@ -169,8 +169,10 @@ class PolicyDiscoveryAgent:
             search_metadata={
                 "search_time": search_time,
                 "user_context": user_context,
-                "search_parameters": search_params,
+                "webset_policies_count": len(webset_policies),
+                "search_policies_count": len(search_policies),
                 "policy_analysis": policy_analysis,
+                "hybrid_mode": use_websets,
             },
             total_found=len(all_policies),
             search_time=search_time,
@@ -579,6 +581,7 @@ class PolicyDiscoveryAgent:
                 # Assume highlights might be in the content preview metadata
                 highlights_text = policy.content_preview.lower()
             
+            # Combined text for comprehensive interest matching
             combined_text = f"{policy_text} {highlights_text}"
             
             for interest in user_context.interests:
@@ -589,6 +592,8 @@ class PolicyDiscoveryAgent:
                             interest_relevance += 0.15  # Higher weight for title/summary
                         elif word in highlights_text:
                             interest_relevance += 0.1   # Medium weight for highlights
+                        elif word in combined_text:
+                            interest_relevance += 0.05  # Lower weight for general content
             score += min(interest_relevance, 0.6)  # Cap at 0.6
 
             # 3. Stakeholder role relevance
@@ -908,3 +913,113 @@ class PolicyDiscoveryAgent:
         """
         from dataclasses import asdict
         return asdict(response)
+
+    # Hybrid Webset + Search Methods
+
+    async def initialize_websets(self) -> Dict[str, str]:
+        """
+        Initialize all policy websets for structured collection
+        
+        Returns:
+            Dictionary mapping webset names to webset IDs
+        """
+        self.logger.info("Initializing policy websets...")
+        webset_ids = await self.webset_manager.initialize_websets()
+        self._websets_initialized = True
+        return webset_ids
+
+    async def setup_policy_monitoring(self) -> Dict[str, str]:
+        """
+        Set up automated monitoring for policy updates
+        
+        Returns:
+            Dictionary mapping webset names to monitor IDs
+        """
+        if not self._websets_initialized:
+            await self.initialize_websets()
+        
+        return await self.webset_manager.setup_monitors()
+
+    async def get_webset_status(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get status of all managed websets
+        
+        Returns:
+            Dictionary with status information for each webset
+        """
+        return await self.webset_manager.get_webset_status()
+
+    async def _execute_live_search(
+        self,
+        user_context: UserContext,
+        domains: list[PolicyDomain] | None,
+        government_levels: list[GovernmentLevel] | None,
+    ) -> list[PolicyResult]:
+        """
+        Execute live search using the existing search engine
+        
+        Args:
+            user_context: User context for search
+            domains: Specific domains to search
+            government_levels: Specific government levels to search
+            
+        Returns:
+            List of policy results from live search
+        """
+        # Generate search parameters
+        search_params = self._generate_search_parameters(
+            user_context, domains, government_levels
+        )
+
+        # Execute searches across government levels
+        search_tasks = []
+        levels_to_search = government_levels or list(GovernmentLevel)
+
+        for level in levels_to_search:
+            task = self._search_government_level(level, search_params)
+            search_tasks.append(task)
+
+        # Execute searches concurrently
+        search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+        # Process and organize results
+        all_search_policies = []
+
+        for i, result in enumerate(search_results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Search failed for {levels_to_search[i]}: {result}")
+                continue
+
+            if isinstance(result, list):
+                all_search_policies.extend(result)
+
+        return all_search_policies
+
+    def _combine_webset_and_search_results(
+        self, 
+        webset_policies: list[PolicyResult], 
+        search_policies: list[PolicyResult]
+    ) -> list[PolicyResult]:
+        """
+        Combine and deduplicate webset and search results
+        
+        Args:
+            webset_policies: Policies from websets
+            search_policies: Policies from live search
+            
+        Returns:
+            Combined and deduplicated list of policies
+        """
+        # Combine all policies
+        all_policies = webset_policies + search_policies
+        
+        # Deduplicate using existing method
+        deduplicated_policies = self._deduplicate_policies(all_policies)
+        
+        # Boost confidence scores for webset policies (they're pre-filtered)
+        for policy in deduplicated_policies:
+            # Check if this policy came from websets
+            if any(wp.url == policy.url for wp in webset_policies):
+                policy.confidence_score = min(policy.confidence_score + 0.1, 1.0)
+        
+        return deduplicated_policies

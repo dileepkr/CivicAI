@@ -1,6 +1,6 @@
 # Makefile for CivicAI Policy Discovery project with UV support
 
-.PHONY: help install install-dev sync lock clean test lint format type-check run-example docs build
+.PHONY: help install install-dev sync lock clean test lint format type-check run-example run-webset-example init-websets setup-monitoring webset-status docs build
 
 # Default target
 help:
@@ -20,7 +20,15 @@ help:
 	@echo "  clean           Clean cache and build artifacts"
 	@echo ""
 	@echo "Usage:"
-	@echo "  run-example     Run the example policy discovery script"
+	@echo "  run-example     Run the basic policy discovery example"
+	@echo "  run-webset-example  Run the hybrid webset + search example"
+	@echo ""
+	@echo "Webset Management:"
+	@echo "  init-websets    Initialize policy websets for structured collection"
+	@echo "  setup-monitoring Set up automated policy monitoring"
+	@echo "  webset-status   Check status of all managed websets"
+	@echo ""
+	@echo "Documentation & Build:"
 	@echo "  docs            Generate documentation"
 	@echo "  build           Build the package"
 
@@ -62,6 +70,19 @@ check: lint type-check test
 # Usage commands
 run-example:
 	uv run python policy_discovery/example.py
+
+run-webset-example:
+	uv run python policy_discovery/webset_example.py
+
+# Webset management commands
+init-websets:
+	uv run python -c "import asyncio; from policy_discovery import PolicyDiscoveryAgent; agent = PolicyDiscoveryAgent(); asyncio.run(agent.initialize_websets())"
+
+setup-monitoring:
+	uv run python -c "import asyncio; from policy_discovery import PolicyDiscoveryAgent; agent = PolicyDiscoveryAgent(); asyncio.run(agent.setup_policy_monitoring())"
+
+webset-status:
+	uv run python -c "import asyncio; from policy_discovery import PolicyDiscoveryAgent; agent = PolicyDiscoveryAgent(); print(asyncio.run(agent.get_webset_status()))"
 
 # Documentation
 docs:

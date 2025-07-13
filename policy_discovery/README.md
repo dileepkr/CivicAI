@@ -4,11 +4,18 @@ A sophisticated CrewAI-based agent for discovering relevant government policies 
 
 ## Features
 
+### Core Policy Discovery
 - **Multi-Level Government Search**: Discovers policies at Federal, State (California), and Local (San Francisco) levels
 - **Intelligent Categorization**: Automatically classifies policies by domain (Housing, Labor, Public Safety, etc.)
 - **Stakeholder-Aware**: Maps policy impacts to specific stakeholder groups (renters, business owners, employees, etc.)
 - **Context-Driven Search**: Generates targeted queries based on user location, roles, and interests
-- **Real-time Discovery**: Uses Exa API for up-to-date policy information from government sources
+
+### Hybrid Architecture (NEW)
+- **Structured Collection**: Uses Exa Websets for organized policy repositories with automatic deduplication
+- **Real-time Search**: Combines webset data with live search for the most current information
+- **Automated Monitoring**: Continuous policy discovery with scheduled webset monitors
+- **Enhanced Enrichment**: Extracts structured metadata (dates, stakeholders, status) from policies
+- **Quality Scoring**: Advanced relevance ranking combining webset criteria and search confidence
 
 ## Quick Start
 
@@ -124,14 +131,89 @@ async def main():
 asyncio.run(main())
 ```
 
+### Hybrid Webset + Search Usage
+
+```python
+import asyncio
+from policy_discovery import PolicyDiscoveryAgent, UserContext, PolicyDomain
+
+async def hybrid_example():
+    # Initialize agent
+    agent = PolicyDiscoveryAgent()
+    
+    # One-time setup: Initialize websets for structured collection
+    webset_ids = await agent.initialize_websets()
+    print(f"Initialized {len(webset_ids)} websets")
+    
+    # Set up automated monitoring (daily policy updates)
+    monitor_ids = await agent.setup_policy_monitoring()
+    print(f"Created {len(monitor_ids)} monitors")
+    
+    # Use hybrid approach for policy discovery
+    context = UserContext(
+        location="San Francisco, CA",
+        stakeholder_roles=["renter"],
+        interests=["rent control"]
+    )
+    
+    # Hybrid mode: combines webset data + live search
+    results = await agent.discover_policies(
+        user_context=context,
+        domains=[PolicyDomain.HOUSING],
+        use_websets=True  # Enable hybrid mode
+    )
+    
+    print(f"Found {results.total_found} policies")
+    print(f"Webset policies: {results.search_metadata['webset_policies_count']}")
+    print(f"Live search policies: {results.search_metadata['search_policies_count']}")
+
+asyncio.run(hybrid_example())
+```
+
+### Make Commands
+
+```bash
+# Run hybrid webset example
+make run-webset-example
+
+# Initialize websets (one-time setup)
+make init-websets
+
+# Set up automated monitoring
+make setup-monitoring
+
+# Check webset status
+make webset-status
+```
+
 ## Architecture
 
 ### Core Components
 
-- **PolicyDiscoveryAgent**: Main CrewAI agent orchestrating policy discovery
-- **PolicySearchEngine**: Exa API integration for government content search
+- **PolicyDiscoveryAgent**: Main CrewAI agent orchestrating hybrid policy discovery
+- **PolicySearchEngine**: Exa API integration for real-time government content search  
+- **WebsetManager**: Exa Websets integration for structured policy collection and monitoring
 - **PolicyClassifier**: ML-based classification for domains and status
 - **StakeholderAnalyzer**: Impact analysis for different user groups
+
+### Hybrid Architecture Flow
+
+```
+User Query → PolicyDiscoveryAgent
+    ├── WebsetManager.query_websets() → Structured Policy Collection
+    ├── PolicySearchEngine.search_policies() → Real-time Search
+    └── Combine & Deduplicate → Ranked Results
+```
+
+### Webset Organization
+
+- **Federal Housing**: `federal_housing` - Federal housing policies and HUD regulations
+- **State Housing**: `state_housing` - California housing legislation and rent control laws  
+- **Local Housing**: `local_housing` - San Francisco housing ordinances and zoning policies
+- **Federal Labor**: `federal_labor` - Federal labor laws and NLRB policies
+- **State Labor**: `state_labor` - California labor legislation and worker protection laws
+- **Local Labor**: `local_labor` - San Francisco labor ordinances and minimum wage policies
+- **State General**: `state_general` - General California legislation across all domains
 
 ### Data Models
 
