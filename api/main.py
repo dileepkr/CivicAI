@@ -48,6 +48,7 @@ from src.dynamic_crew.crew import DynamicCrewAutomationForPolicyAnalysisAndDebat
 # Import policy discovery agent
 from policy_discovery.agent import PolicyDiscoveryAgent
 from policy_discovery.models import UserContext, RegulationTiming, PolicyDiscoveryResponse
+from policy_discovery.config import GOVERNMENT_DOMAINS
 
 # Import A2A protocol integration
 from api.a2a_integration import (
@@ -157,6 +158,78 @@ class DebateSessionManager:
 
 # Initialize session manager
 session_manager = DebateSessionManager()
+
+def is_government_domain(url: str) -> bool:
+    """Check if URL is from a trusted government domain"""
+    url_lower = url.lower()
+    
+    # Flatten all government domains from config
+    all_gov_domains = []
+    for level_domains in GOVERNMENT_DOMAINS.values():
+        all_gov_domains.extend(level_domains)
+    
+    # Check if URL contains any government domain
+    return any(domain in url_lower for domain in all_gov_domains)
+
+def classify_content_type(title: str, url: str, content: str = "") -> str:
+    """Classify content as 'news', 'policy', or 'mixed' based on title, URL, and content"""
+    title_lower = title.lower()
+    url_lower = url.lower()
+    content_lower = content.lower() if content else ""
+    
+    # Strong policy indicators
+    policy_indicators = [
+        "bill", "act", "regulation", "ordinance", "law", "statute", "code",
+        "policy", "proposal", "amendment", "resolution", "directive",
+        "executive order", "memorandum", "rule", "standard", "guideline",
+        "legislation", "legislative", "senate bill", "house bill", "sb ", "hr ",
+        "cfr", "usc", "public law", "pl ", "chapter", "section"
+    ]
+    
+    # Strong news indicators
+    news_indicators = [
+        "breaking", "news", "report", "announced", "today", "yesterday",
+        "this week", "this month", "according to", "sources say",
+        "investigation", "exclusive", "update", "developing", "latest",
+        "coverage", "story", "article", "journalist", "reporter"
+    ]
+    
+    # URL-based classification (most reliable)
+    news_domains = [
+        "cnn.com", "bbc.com", "reuters.com", "ap.org", "npr.org",
+        "nytimes.com", "washingtonpost.com", "wsj.com", "usatoday.com",
+        "abcnews.go.com", "cbsnews.com", "nbcnews.com", "foxnews.com",
+        "politico.com", "thehill.com", "bloomberg.com", "guardian.com",
+        "news", "media", "press", "herald", "times", "post", "journal",
+        "tribune", "gazette", "chronicle", "daily", "weekly"
+    ]
+    
+    # Check if it's from a trusted government domain first
+    if is_government_domain(url):
+        return "policy"
+    
+    # Check URL for news domains
+    if any(domain in url_lower for domain in news_domains):
+        return "news"
+    
+    # Count indicators in title (weighted heavily)
+    title_policy_count = sum(1 for indicator in policy_indicators if indicator in title_lower)
+    title_news_count = sum(1 for indicator in news_indicators if indicator in title_lower)
+    
+    # Count indicators in content (less weight)
+    content_policy_count = sum(1 for indicator in policy_indicators if indicator in content_lower) * 0.3
+    content_news_count = sum(1 for indicator in news_indicators if indicator in content_lower) * 0.3
+    
+    total_policy_score = title_policy_count * 2 + content_policy_count
+    total_news_score = title_news_count * 2 + content_news_count
+    
+    # Decision logic
+    if total_policy_score > total_news_score and total_policy_score > 0.5:
+        return "policy"
+    elif total_news_score > total_policy_score and total_news_score > 0.5:
+        return "news"
+    else:
+        return "mixed"
 
 # Initialize debate systems
 debug_system = DebugDebateSystem()
@@ -710,6 +783,7 @@ async def search_policies_stream(request: Request):
         body = await request.json()
         prompt = body.get("prompt", "")
         max_results = body.get("max_results", 8)
+        content_filter = body.get("content_filter", "both")  # "policies", "news", "both"
         
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt is required")
@@ -766,20 +840,42 @@ async def search_policies_stream(request: Request):
                                 
                             policy = policy_discovery_agent._create_policy_result(item, level)
                             if policy:
-                                discovery_result.priority_ranking.append(policy)
+                                # Classify content type and apply filter
+                                content_type = classify_content_type(
+                                    policy.title, 
+                                    policy.url, 
+                                    policy.content_preview or ""
+                                )
+                                
+                                # Apply content filter with strict government domain enforcement for policies
+                                if content_filter == "both" or \
+                                   (content_filter == "policies" and is_government_domain(policy.url)) or \
+                                   (content_filter == "news" and content_type in ["news", "mixed"]):
+                                    discovery_result.priority_ranking.append(policy)
                         
                         for policy_result in discovery_result.priority_ranking[:max_results]:
-                            local_policies.append({
-                                "id": policy_result.url.split("/")[-1] or f"discovered_{len(local_policies)}",
-                                "title": policy_result.title,
-                                "summary": policy_result.summary,
-                                "date": policy_result.last_updated.isoformat() if policy_result.last_updated else "Unknown",
-                                "url": policy_result.url,
-                                "government_level": policy_result.government_level.value,
-                                "domain": policy_result.domain.value,
-                                "relevance_score": policy_result.confidence_score,
-                                "matched_keywords": keywords
-                            })
+                            content_type = classify_content_type(
+                                policy_result.title, 
+                                policy_result.url, 
+                                policy_result.content_preview or ""
+                            )
+                            
+                            # Apply content filter with strict government domain enforcement for policies
+                            if content_filter == "both" or \
+                               (content_filter == "policies" and is_government_domain(policy_result.url)) or \
+                               (content_filter == "news" and content_type in ["news", "mixed"]):
+                                local_policies.append({
+                                    "id": policy_result.url.split("/")[-1] or f"discovered_{len(local_policies)}",
+                                    "title": policy_result.title,
+                                    "summary": policy_result.summary,
+                                    "date": policy_result.last_updated.isoformat() if policy_result.last_updated else "Unknown",
+                                    "url": policy_result.url,
+                                    "government_level": policy_result.government_level.value,
+                                    "domain": policy_result.domain.value,
+                                    "relevance_score": policy_result.confidence_score,
+                                    "matched_keywords": keywords,
+                                    "content_type": content_type
+                                })
                         
                         if local_policies:
                             # Skip fallback if we found policies via discovery
@@ -844,17 +940,29 @@ async def search_policies_stream(request: Request):
                                         if len(summary) > 200:
                                             summary = summary[:197] + "..."
                                     
-                                    local_policies.append({
-                                        "id": policy_name,
-                                        "title": policy_data["title"],
-                                        "summary": summary,
-                                        "date": policy_data["date"],
-                                        "url": f"/policies/{policy_name}",
-                                        "government_level": "local",
-                                        "domain": "general",
-                                        "relevance_score": max(0.3, relevance_score),  # Minimum relevance score
-                                        "matched_keywords": matched_keywords
-                                    })
+                                    # Classify content type and apply filter
+                                    content_type = classify_content_type(
+                                        policy_data["title"], 
+                                        f"/policies/{policy_name}", 
+                                        policy_text
+                                    )
+                                    
+                                    # Apply content filter
+                                    if content_filter == "both" or \
+                                       (content_filter == "policies" and content_type in ["policy", "mixed"]) or \
+                                       (content_filter == "news" and content_type in ["news", "mixed"]):
+                                        local_policies.append({
+                                            "id": policy_name,
+                                            "title": policy_data["title"],
+                                            "summary": summary,
+                                            "date": policy_data["date"],
+                                            "url": f"/policies/{policy_name}",
+                                            "government_level": "local",
+                                            "domain": "general",
+                                            "relevance_score": max(0.3, relevance_score),  # Minimum relevance score
+                                            "matched_keywords": matched_keywords,
+                                            "content_type": content_type
+                                        })
                             except Exception as e:
                                 logger.error(f"Error loading policy {policy_name}: {e}")
                                 # Try to add a basic entry even if loading fails
@@ -906,17 +1014,29 @@ async def search_policies_stream(request: Request):
                                     if len(summary) > 200:
                                         summary = summary[:197] + "..."
                                 
-                                local_policies.append({
-                                    "id": policy_name,
-                                    "title": policy_data["title"],
-                                    "summary": summary,
-                                    "date": policy_data["date"],
-                                    "url": f"/policies/{policy_name}",
-                                    "government_level": "local",
-                                    "domain": "general",
-                                    "relevance_score": 0.3,
-                                    "matched_keywords": []
-                                })
+                                # Classify content type and apply filter
+                                content_type = classify_content_type(
+                                    policy_data["title"], 
+                                    f"/policies/{policy_name}", 
+                                    policy_text
+                                )
+                                
+                                # Apply content filter - exclude local fallback policies from strict policy filter
+                                local_policy_url = f"/policies/{policy_name}"
+                                if content_filter == "both" or \
+                                   (content_filter == "news" and content_type in ["news", "mixed"]):
+                                    local_policies.append({
+                                        "id": policy_name,
+                                        "title": policy_data["title"],
+                                        "summary": summary,
+                                        "date": policy_data["date"],
+                                        "url": f"/policies/{policy_name}",
+                                        "government_level": "local",
+                                        "domain": "general",
+                                        "relevance_score": 0.3,
+                                        "matched_keywords": [],
+                                        "content_type": content_type
+                                    })
                             except Exception as e:
                                 logger.error(f"Error loading policy {policy_name} in fallback: {e}")
                 

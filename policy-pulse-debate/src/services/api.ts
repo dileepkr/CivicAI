@@ -35,6 +35,7 @@ export interface PolicyDiscoveryRequest {
 export interface PolicySearchRequest {
   prompt: string;
   max_results?: number;
+  content_filter?: 'policies' | 'news' | 'both';
 }
 
 export interface StakeholderImpact {
@@ -57,6 +58,7 @@ export interface DiscoveredPolicy {
   stakeholder_impacts: StakeholderImpact[];
   confidence_score: number;
   content_preview?: string;
+  content_type?: 'news' | 'policy' | 'mixed';
 }
 
 export interface PolicyDiscoveryResponse {

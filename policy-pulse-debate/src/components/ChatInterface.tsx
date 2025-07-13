@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Loader2, User, Bot, FileText, MessageCircle, Mail, Search, Users, ChevronDown, ChevronUp, Building, Globe, Home, Shield, Briefcase, Heart, Calendar, Star } from 'lucide-react';
+import { Send, Loader2, User, Bot, FileText, MessageCircle, Mail, Search, Users, ChevronDown, ChevronUp, Building, Globe, Home, Shield, Briefcase, Heart, Calendar, Star, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   apiClient, 
   Policy, 
@@ -152,8 +153,27 @@ const ChatInterface: React.FC = () => {
   const [debateMessages, setDebateMessages] = useState<DebateMessage[]>([]);
   const [isDebateActive, setIsDebateActive] = useState(false);
   const [expandedPolicies, setExpandedPolicies] = useState<Set<string>>(new Set());
+  const [contentFilter, setContentFilter] = useState<'policies' | 'news' | 'both'>('both');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const getContentTypeColor = (contentType: string) => {
+    switch (contentType) {
+      case 'policy': return 'bg-emerald-100 text-emerald-800';
+      case 'news': return 'bg-orange-100 text-orange-800';
+      case 'mixed': return 'bg-indigo-100 text-indigo-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getContentTypeIcon = (contentType: string) => {
+    switch (contentType) {
+      case 'policy': return '📋';
+      case 'news': return '📰';
+      case 'mixed': return '📊';
+      default: return '📄';
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -231,7 +251,8 @@ const ChatInterface: React.FC = () => {
         },
         body: JSON.stringify({
           prompt: query,
-          max_results: 8
+          max_results: 8,
+          content_filter: contentFilter
         })
       });
 
@@ -565,6 +586,12 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
                         {Math.round(policy.confidence_score * 100)}%
                       </Badge>
                     )}
+                    {policy.content_type && (
+                      <Badge className={`text-xs ${getContentTypeColor(policy.content_type)}`}>
+                        <span className="mr-1">{getContentTypeIcon(policy.content_type)}</span>
+                        {policy.content_type}
+                      </Badge>
+                    )}
                   </div>
                 </div>
                 <Collapsible>
@@ -774,6 +801,19 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
               className="flex-1"
               disabled={isLoading}
             />
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-gray-500" />
+              <Select value={contentFilter} onValueChange={(value) => setContentFilter(value as any)}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="both">📄 All</SelectItem>
+                  <SelectItem value="policies">📋 Policies</SelectItem>
+                  <SelectItem value="news">📰 News</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <Button 
               type="submit" 
               disabled={isLoading || !inputValue.trim()}
@@ -783,16 +823,17 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
             </Button>
           </div>
           
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setInputValue("Find housing policies")}
-              disabled={isLoading}
-              className="text-xs"
-            >
-              Housing
-            </Button>
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setInputValue("Find housing policies")}
+                disabled={isLoading}
+                className="text-xs"
+              >
+                Housing
+              </Button>
             <Button
               variant="outline"
               size="sm"
@@ -820,6 +861,10 @@ ${policy.stakeholder_impacts && policy.stakeholder_impacts.length > 0 ?
             >
               Environment
             </Button>
+            </div>
+            <div className="text-xs text-gray-500">
+              Filter: {contentFilter === 'both' ? 'All Content' : contentFilter === 'policies' ? 'Policies Only' : 'News Only'}
+            </div>
           </div>
         </form>
       </div>
